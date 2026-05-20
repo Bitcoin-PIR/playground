@@ -272,6 +272,12 @@ export async function runDpfQuery(
       { url: PIR2_URL, label: 'query (pir2)', pin: PIR2_TIER3_PIN, index: 1 },
     ]);
 
+    // Catalog warms the native-side state that `queryBatchRaw` needs to
+    // resolve `db_id` against. Without this, the next call errors with
+    // "invalid state: no catalog".
+    const catalog = await client.fetchCatalog();
+    catalog.free?.();
+
     const packed = new Uint8Array(20);
     packed.set(scriptHash, 0);
 
@@ -325,6 +331,10 @@ export async function runHarmonyQuery(
       { url: QUERY_URL, label: 'query (pir2)', pin: PIR2_TIER3_PIN, index: 1 },
     ]);
 
+    // Warm up the catalog so `queryBatchRaw` can resolve db_id.
+    const catalog = await client.fetchCatalog();
+    catalog.free?.();
+
     const packed = new Uint8Array(20);
     packed.set(scriptHash, 0);
 
@@ -366,6 +376,31 @@ export async function runHarmonyQuery(
 
 // ── OnionPIR backend (hand-rolled TS client) ──────────────────────────────
 
+/**
+ * Install the OnionPIR wasm factory via the documented test hook
+ * (`globalThis.__onionpirWasmFactory`).  The vendored client's `loadWasmModule`
+ * does `import('/wasm/onionpir_client.mjs')` at runtime — webpack rewrites
+ * the literal at bundle time and the resulting module-resolution call fails
+ * with `Cannot find module '/wasm/onionpir_client.mjs'`.  Bypassing the
+ * webpack-managed import by installing the factory ourselves loads the same
+ * `.mjs` from /public via the native browser loader.
+ */
+async function ensureOnionWasmFactory(): Promise<void> {
+  type OnionFactory = (m?: object) => Promise<unknown>;
+  type Holder = { __onionpirWasmFactory?: OnionFactory };
+  const g = globalThis as unknown as Holder;
+  if (g.__onionpirWasmFactory) return;
+  // `webpackIgnore: true` tells webpack to leave the import alone; the
+  // browser's native ESM loader fetches from /wasm/onionpir_client.mjs
+  // (served out of public/ at request time).  The path is computed at
+  // runtime so `tsc --noEmit` doesn't try to resolve it.
+  const url = '/wasm/onionpir_client.mjs';
+  const mod = (await import(/* webpackIgnore: true */ /* @vite-ignore */ url)) as {
+    default: OnionFactory;
+  };
+  g.__onionpirWasmFactory = mod.default;
+}
+
 export async function runOnionPirQuery(
   scriptHash: Uint8Array,
   scriptPubKeyHex: string,
@@ -376,6 +411,7 @@ export async function runOnionPirQuery(
   const url = PIR1_URL;
   const t0 = performance.now();
   const notes: string[] = [];
+  await ensureOnionWasmFactory();
   const client = new OnionPirWebClient({ serverUrl: url });
   try {
     await client.connect();
