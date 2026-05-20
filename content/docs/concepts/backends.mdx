@@ -1,0 +1,151 @@
+# Backend comparison
+
+Bitcoin PIR ships three backends. They expose nearly identical SDK
+surfaces, but the trade-offs differ. This page helps you pick.
+
+<Callout kind="tip" title="TL;DR">
+If you're integrating into a wallet right now, use **DPF**. It's the
+default everywhere, the easiest to reason about, and has the lowest
+per-query latency on a cold connection. Switch to HarmonyPIR if you
+have many queries per session. Switch to OnionPIR only if you can't
+deploy two non-colluding servers.
+</Callout>
+
+## At a glance
+
+<BackendMatrix />
+
+## DPF — the default
+
+[Distributed Point Functions](/docs/protocol/dpf) split a single
+"point query" into two keys, one sent to each server. Each server
+applies its key to the full database and returns a share; the client
+XORs the shares to recover the answer. Neither server alone learns
+the query.
+
+**Strengths.**
+
+- **Stateless.** No persistent client-side state, no hint cache.
+  Connect, query, disconnect — the same flow every time.
+- **Lowest round-trip cost** for a single query. No offline phase,
+  no FHE keys to register.
+- **Batch-friendly.** The K=75 / K_CHUNK=80 padding amortises across
+  a batch of addresses for almost no extra cost over a single
+  address.
+- **Two-server unconditional security.** As long as the two servers
+  don't collude, neither sees the query.
+
+**Trade-offs.**
+
+- Needs two servers. If you can only run one, you need
+  [OnionPIR](/docs/protocol/onionpir) instead.
+- Bandwidth scales linearly with database size on each query — no
+  amortisation across queries the way HarmonyPIR has.
+
+**Pick DPF when.** You're integrating from scratch. You want the
+canonical, simplest flow. You ship a browser wallet and don't want a
+state cache layer.
+
+## HarmonyPIR — for long sessions
+
+[HarmonyPIR](/docs/protocol/harmonypir) does an **offline hint
+phase**: before any query, the client pulls a per-database hint blob
+from the hint server. Subsequent queries against the *query* server
+are cheap — the hint is the secret-shared sketch that lets one server
+respond. After ~√n queries, the hint is exhausted and the client
+re-runs the offline phase.
+
+**Strengths.**
+
+- **Amortised cost wins** the longer a session runs. After the first
+  query, each subsequent query is much cheaper than a DPF query
+  against the same database.
+- **Same two-server, non-collusion** security as DPF.
+
+**Trade-offs.**
+
+- The offline phase takes a few seconds — adds noticeable latency to
+  the *first* query.
+- **Stateful**. The hint cache must be managed; the SDK provides
+  `saveHints()` / `loadHints()` and an IndexedDB bridge in the
+  reference web client, but you have to plumb that into your wallet's
+  storage layer.
+- **Hint exhaustion** is a real failure mode. The SDK exposes
+  `minQueriesRemaining()` so the wallet can pro-actively refresh.
+
+**Pick HarmonyPIR when.** Your wallet does many lookups per session
+(e.g. a portfolio tracker checking 1000 addresses against the chain
+every block) and you can budget a few-second warm-up.
+
+## OnionPIR — single-server
+
+[OnionPIR](/docs/protocol/onionpir) uses **Fully Homomorphic
+Encryption (BFV via Microsoft SEAL)** to encode the client's query
+inside ciphertext that the server can evaluate without decrypting.
+One server, no collusion assumption.
+
+**Strengths.**
+
+- **No second server.** You can deploy on a single VM and still get
+  the full privacy guarantee.
+- **No non-collusion assumption** — privacy holds even if the single
+  server is fully adversarial (modulo the FHE security assumption,
+  which is the standard hardness of Ring-LWE for BFV).
+
+**Trade-offs.**
+
+- **Slower per query** than DPF or HarmonyPIR by a wide margin —
+  FHE evaluation is expensive.
+- **Larger ciphertexts** on the wire.
+- **No batched queries** — each script hash is one separate
+  ciphertext. You can pipeline them, but the per-query cost dominates.
+- **Stateful FHE keys** — the client registers a public key with the
+  server; key rotation is a manual step.
+- **No WASM client.** SEAL doesn't compile to `wasm32-unknown-unknown`.
+  The browser client is a hand-rolled TS port that mirrors the Rust
+  reference; the WASM SDK only covers DPF and HarmonyPIR.
+
+**Pick OnionPIR when.** You're operating in an environment where the
+two-server deployment isn't an option — for example, a single VPS
+provider, or a corporate network with restrictive egress.
+
+## What's the same across all three
+
+This is the important bit. The three backends expose nearly identical
+SDK surfaces (`sync(scriptHashes, lastHeight)` returns the same
+`WasmSyncResult` shape) and share the same **wire-shape privacy
+invariants** — the [four invariants](/docs/privacy/invariants) hold
+for all three:
+
+- K=75 INDEX-group padding, K_CHUNK=80 CHUNK-group padding.
+- Two INDEX Merkle items per query, every query.
+- A CHUNK PIR round always follows an INDEX query.
+- PBC group-symmetric Merkle placement.
+
+A wallet switching backends doesn't need to rewrite its query layer.
+The decision is operational (which servers can you deploy?) and
+performance-shaped (how many queries per session?), not security-shaped.
+
+## Mixing backends in one wallet
+
+The three backends can run side-by-side. A wallet might:
+
+- Use **HarmonyPIR** for the initial full-snapshot sync against the
+  authoritative database (~880k blocks of UTXOs).
+- Use **DPF** for delta syncs against per-block delta databases —
+  the hint phase isn't worth the warm-up for a small delta.
+- Use **OnionPIR** as a fallback when only one of the two servers
+  is reachable.
+
+The SDK doesn't pick for you. See the reference web app's
+[sync controller](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/sync-controller.ts)
+for one pattern.
+
+## Where to go next
+
+- [Quickstart](/docs/quickstart) — copy-paste DPF integration.
+- [Wire format](/docs/protocol/wire-format) — the WebSocket frame
+  shapes shared across all three backends.
+- [DPF protocol](/docs/protocol/dpf),
+  [HarmonyPIR protocol](/docs/protocol/harmonypir),
+  [OnionPIR protocol](/docs/protocol/onionpir) — per-backend details.

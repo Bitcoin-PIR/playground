@@ -1,0 +1,200 @@
+# DPF protocol
+
+DPF — Distributed Point Functions — is the two-server PIR primitive
+behind Bitcoin PIR's default backend. This page describes how a
+single query flows on the wire, what each round contributes, and what
+each frame's payload looks like.
+
+For the framing envelope shared with the other backends see
+[Wire format](/docs/protocol/wire-format).
+
+## Database layout
+
+The server-side database has two layers:
+
+- **INDEX layer.** A cuckoo table that maps each script hash to a
+  pointer (`start_chunk_id`, `num_chunks`) into the chunk layer.
+  Each INDEX bin has `INDEX_SLOTS_PER_BIN = 4` slots; each slot is
+  `INDEX_SLOT_SIZE = 13` bytes (8 B fingerprint tag, 4 B
+  `start_chunk_id`, 1 B `num_chunks`).
+- **CHUNK layer.** A cuckoo table indexed by `chunk_id`. Each CHUNK
+  bin has `CHUNK_SLOTS_PER_BIN = 3` slots; each slot is `4 +
+  CHUNK_SIZE = 4 + 40 = 44` bytes (4 B `chunk_id`, 40 B data).
+
+A query for a script hash flows in two phases:
+
+1. **INDEX phase.** Look up the script hash's pointer in the cuckoo
+   table.
+2. **CHUNK phase.** Use the pointer to fetch the UTXO data.
+
+Both phases use the same DPF primitive. The only difference is
+which database the keys index into.
+
+## INDEX phase
+
+### Group selection
+
+The client derives `NUM_HASHES = 3` candidate **PBC groups** for the
+script hash via `derive_groups(script_hash, K)`. The PBC planner
+picks one of the three for the actual query placement (the other two
+candidates are reserved by the server for the same script hash, so
+any of the three can serve the query). See [the INDEX Merkle
+group-symmetry invariant](/docs/privacy/invariants) for why the
+planner picks rather than the client.
+
+The client also derives two **cuckoo positions** within the chosen
+group via `cuckoo_hash(script_hash, key, num_bins)` for each of the
+`INDEX_CUCKOO_NUM_HASHES = 2` hash functions. These are the two bins
+where the script hash *might* live; the client must check both.
+
+### DPF keys
+
+For each of the K = 75 groups in the batch, the client builds a DPF
+keypair targeting the cuckoo bin it wants to read. The bin index is
+encoded in a domain of `2^DPF_N = 2^20 = 1,048,576` entries (large
+enough to cover any per-group cuckoo table).
+
+The two keys are produced by `libdpf::Dpf::gen_keys(point, value=1)`:
+
+- Each key alone looks like uniform random bytes to a single server.
+- When both servers apply their key to the database and XOR their
+  shares, the client recovers `db[point]` — the bin content.
+
+For groups that don't have a real query (because the batch has fewer
+than K = 75 real placements), the client generates **random DPF
+keys** as padding. The server cannot distinguish padding from a real
+query.
+
+### Frame
+
+```text
+REQ_INDEX_BATCH (0x11)
+  + BatchQuery payload
+    + 2B round_id
+    + 1B count = K = 75
+    + 1B keys_per_group = 2 (one per cuckoo position)
+    + per-group:
+        + 2B u16 key_len, key bytes  (DPF key 0)
+        + 2B u16 key_len, key bytes  (DPF key 1)
+    + (optional trailing db_id byte)
+```
+
+The server responds with `RESP_INDEX_BATCH` — same shape, with each
+key replaced by the corresponding share of the indexed bin's content.
+
+### Recovery
+
+The client XORs the two servers' shares to recover the bin content
+(`INDEX_SLOTS_PER_BIN * INDEX_SLOT_SIZE = 4 * 13 = 52` bytes per
+bin). It then scans the bin's slots for one whose `tag` matches
+`compute_tag(tag_seed, script_hash)`:
+
+- Found → take `start_chunk_id` and `num_chunks` from the matching
+  slot. Proceed to the CHUNK phase.
+- Not found in this bin → check the *other* cuckoo position
+  (`INDEX_CUCKOO_NUM_HASHES = 2`). The SDK probes both
+  unconditionally, regardless of whether the first match succeeded —
+  see [Invariant 1](/docs/privacy/invariants).
+- Not found in either bin → the script hash is verified absent.
+- Found with `num_chunks = 0` → **whale**: too many UTXOs to fit in
+  the chunk slots. The SDK reports `isWhale = true` and skips the
+  CHUNK phase.
+
+## CHUNK phase
+
+If the INDEX phase returned a `(start_chunk_id, num_chunks)` pointer,
+the client fetches each of those chunks from the CHUNK database.
+
+### Group selection
+
+Each `chunk_id` derives 3 PBC groups via `derive_chunk_groups(chunk_id,
+K_CHUNK)`. The client uses two cuckoo positions per group via
+`cuckoo_hash_int`.
+
+### Frame
+
+```text
+REQ_CHUNK_BATCH (0x21)
+  + BatchQuery payload
+    + 2B round_id
+    + 1B count = K_CHUNK = 80
+    + 1B keys_per_group = 3 (one per cuckoo position)
+    + per-group: 3 × (2B key_len + key bytes)
+    + (optional trailing db_id byte)
+```
+
+Even when the INDEX phase produced no matches (not-found / whale), a
+**fully synthetic K_CHUNK-padded round still goes out** — see
+[Invariant 2](/docs/privacy/invariants). The server cannot
+distinguish a real CHUNK round from a dummy.
+
+### Recovery
+
+The client XORs the two servers' shares to recover each cuckoo bin's
+content (`CHUNK_SLOTS_PER_BIN * CHUNK_SLOT_SIZE = 3 * 44 = 132`
+bytes). For each chunk_id the client expects, it scans the recovered
+bin for the slot whose `chunk_id` matches, and pulls the 40-byte
+data.
+
+The concatenated chunk data is then parsed as a varint-prefixed UTXO
+list:
+
+```text
+[varint count]
+[per UTXO: 32B txid][varint vout][varint amount]
+```
+
+This is the raw payload that surfaces in `WasmQueryResult.getEntry(i)`.
+
+## Merkle phase
+
+The server publishes a per-bucket Merkle commitment over the INDEX
+table and the CHUNK table. After the INDEX and CHUNK rounds, the
+client runs a sequence of **sibling-batch** queries (variant `0x33`)
+to walk the Merkle proof from each consulted bin up to the published
+root.
+
+The proof is split bottom-up:
+
+1. **Sibling rounds.** At each Merkle level the client batches up
+   to `K + K_CHUNK = 155` per-group sibling lookups (one per probed
+   bin). Each level's response is a flat `arity * 32 = 256`-byte
+   sibling row per group.
+2. **Tree-tops.** Once enough sibling rounds have run that the
+   remaining levels fit in the published cache (`cache_from_level`),
+   the client fetches the published tree-tops blob (variant `0x34`)
+   and uses it to combine up to the root.
+
+A reconstruction failure (the recomputed root doesn't match the
+published one) sets `merkle_verified = false` on that query.
+
+The Merkle phase **always emits at least one sibling pass**, even
+for batches of all-not-found queries — see [Invariant 2](/docs/privacy/invariants).
+
+## Padding contract
+
+Per-round counts the SDK always emits, regardless of the real query
+distribution:
+
+| Round           | Count   | Keys per group |
+| --------------- | ------- | -------------- |
+| INDEX           | K = 75  | 2              |
+| CHUNK           | 80      | 3              |
+| INDEX Merkle    | 2 items per query (group-symmetric placement) | — |
+
+A wire observer that sees a `count` deviating from these constants
+is looking at a regression, not a normal query.
+
+## Implementation reference
+
+- TS adapter: [`web/src/dpf-adapter.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/dpf-adapter.ts)
+- Rust client: [`pir-sdk-client/src/dpf.rs`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/pir-sdk-client/src/dpf.rs)
+- Server eval: [`pir-runtime-core/src/eval.rs`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/pir-runtime-core/src/eval.rs)
+
+## Where to go next
+
+- [Wire format](/docs/protocol/wire-format) — the framing envelope.
+- [Privacy invariants](/docs/privacy/invariants) — why everything
+  above is K-padded.
+- [Backend comparison](/docs/concepts/backends) — when to use DPF
+  vs HarmonyPIR vs OnionPIR.

@@ -1,0 +1,191 @@
+# Quickstart
+
+Add Bitcoin PIR to a wallet in under ten minutes. We'll use the
+**DPF backend** — the two-server, stateless flow with the lowest
+round-trip cost — and the [TypeScript / WASM
+SDK](/docs/sdk/typescript). The same flow works in any browser
+wallet, in a desktop wallet that ships a Node runtime, or in any
+JS environment with a `WebSocket`.
+
+By the end you'll have:
+
+1. The WASM SDK loaded in your app.
+2. A connected `WasmDpfClient`.
+3. The list of UTXOs for a real on-chain script hash, **with a
+   server-side Merkle proof verified locally**.
+
+## 1. Install
+
+```bash
+npm install pir-sdk-wasm
+```
+
+The package is the wasm-pack output of the
+[`pir-sdk-wasm`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/pir-sdk-wasm)
+crate. It ships a small JS loader, a `.wasm` binary, and the
+TypeScript `.d.ts`. Bundle works with Webpack, Vite, esbuild, Next.js,
+and any other tool that understands ES modules.
+
+<Callout kind="note" title="Not on npm yet?">
+While the package is finalizing distribution, you can build it
+locally from the main repo with `wasm-pack build --target web --out-dir pkg`
+inside `pir-sdk-wasm/`, and `npm link` it. See
+[`pir-sdk-wasm/README.md`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/pir-sdk-wasm/README.md)
+for the canonical build path.
+</Callout>
+
+## 2. Initialize the WASM module
+
+WASM modules need an explicit `init()` call once per page or worker.
+The wrapper exported as the module's default re-exports every typed
+class:
+
+```ts
+import init, { WasmDpfClient } from 'pir-sdk-wasm';
+
+// Loads the .wasm and runs the panic-hook + tracing setup.
+await init();
+```
+
+You only need to call `init()` once. Subsequent imports are no-ops.
+
+## 3. Connect to the live servers
+
+The reference deployment runs two servers — the [hint
+server](/docs/operations/endpoints) and the SEV-attested **query
+server**. Both URLs go to the `WasmDpfClient` constructor in order:
+
+```ts
+const client = new WasmDpfClient(
+  'wss://weikeng1.bitcoinpir.org',   // hint server
+  'wss://weikeng2.bitcoinpir.org',   // query server
+);
+
+await client.connect();
+```
+
+`connect()` opens both WebSockets, runs the [protocol
+handshake](/docs/protocol/wire-format), and resolves once both are
+ready. It throws on a malformed URL, a CORS rejection, or a server
+refusal.
+
+<Callout kind="warn" title="WebSocket only">
+The endpoints reject plain HTTP — `wss://` only. See [Live
+endpoints](/docs/operations/endpoints) for the wire contract.
+</Callout>
+
+## 4. Run a query
+
+The SDK takes a packed `Uint8Array` of script hashes: 20 bytes each,
+back to back. (Script hashes are the same `HASH160(scriptPubKey)`
+that Electrum uses. The SDK doesn't impose a particular wallet stack
+— derive the hashes however you already do.)
+
+```ts
+// Example: a single script hash. In a real wallet this would be
+// every address derived from your xpub (or, for a watch-only setup,
+// every address the user pasted in).
+const scriptHash = new Uint8Array([
+  0x86, 0xee, 0x42, 0x29, 0x80, 0x4e, 0x21, 0x42,
+  0x8e, 0x32, 0x6f, 0x9d, 0xd2, 0xb2, 0x07, 0x90,
+  0xbc, 0xcb, 0xe9, 0x6a,
+]);
+
+// Pack N script hashes into one Uint8Array (20*N bytes).
+const packed = scriptHash;
+
+// `null` for a fresh sync; pass the last-synced height for an
+// incremental delta sync.
+const sync = await client.sync(packed, null);
+
+for (let i = 0; i < sync.resultCount; i++) {
+  const result = sync.getResult(i);
+  if (!result) {
+    console.log(`${i}: not found (verified absent)`);
+    continue;
+  }
+  console.log(
+    `${i}: ${result.entryCount} UTXO(s), ` +
+    `balance ${result.totalBalance} sat, ` +
+    `merkle verified=${result.merkleVerified}`,
+  );
+  for (let j = 0; j < result.entryCount; j++) {
+    console.log('  ', result.getEntry(j));
+  }
+}
+
+console.log('synced at height', sync.syncedHeight);
+```
+
+That's the full flow. Three things to call out:
+
+- `result === undefined` (`null` in JSON) means the script hash is
+  **verified absent** — the server proved your address isn't in the
+  UTXO set. This is not an error.
+- `result.merkleVerified === false` means the per-bucket Merkle proof
+  failed. The data is **untrusted**; treat the slot as if it returned
+  nothing, log it, and surface a wallet-side warning.
+- `sync.syncedHeight` tells you the block height the result reflects.
+  Persist it and pass it as the second argument on the next call to
+  fetch only the delta.
+
+## 5. Verify privacy (optional but recommended)
+
+If you want to confirm the live server is what it claims to be —
+running the exact reproducible binary, on SEV-SNP hardware, with the
+operator-published MEASUREMENT — call `attest()` and follow the
+[attestation walkthrough](/docs/privacy/attestation):
+
+```ts
+import { AMD_TURIN_ARK_FINGERPRINT, PIR2_TIER3_PIN } from './attest-pin';
+
+const attest = await client.attest(1); // 1 = query server
+
+// 1. Verify the SEV-SNP report's certificate chain back to AMD's
+//    root key.
+await attest.verifyVcekChain(AMD_TURIN_ARK_FINGERPRINT);
+
+// 2. Compare the launch MEASUREMENT to your build-time pin.
+if (attest.launchMeasurementHex !== PIR2_TIER3_PIN.measurementHex) {
+  throw new Error('Server is running a different image than expected');
+}
+
+// 3. Now that you've validated the server identity, upgrade to the
+//    encrypted channel so cloudflared (or any other TLS-terminating
+//    intermediary) sees only ciphertext.
+const attest0 = await client.attest(0);
+await client.upgradeToSecureChannel(
+  attest0.serverStaticPub,
+  attest.serverStaticPub,
+);
+```
+
+The wire to `upgradeToSecureChannel` is AEAD-sealed end-to-end with
+ChaCha20-Poly1305 — see [Attestation](/docs/privacy/attestation) for
+the full picture.
+
+## 6. Disconnect cleanly
+
+```ts
+await client.disconnect();
+```
+
+After this `client.isConnected === false`. Call `connect()` again
+before the next query.
+
+## Where to go next
+
+- **Switching backends.** DPF is the right default for most wallets.
+  For long-lived sessions where the same wallet does many queries,
+  consider [HarmonyPIR](/docs/protocol/harmonypir) — the offline
+  hint phase amortises beautifully. For deployments where you control
+  only one server, use [OnionPIR](/docs/protocol/onionpir).
+- **Inspect the wire.** Open the [wire
+  explorer](/explorer) and run the same query — every frame is
+  decoded and the [four privacy
+  invariants](/docs/privacy/invariants) are checked live.
+- **Persist sync state.** The `WasmSyncResult.syncedHeight` is the
+  only state you need to round-trip across sessions; the SDK itself
+  is stateless on the DPF path.
+- **Handle errors.** See [Troubleshooting](/docs/troubleshooting) for
+  the common failure modes and what they mean.

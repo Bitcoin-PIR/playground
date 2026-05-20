@@ -1,0 +1,221 @@
+# Attestation
+
+The [four privacy invariants](/docs/privacy/invariants) talk about
+the wire shape. Attestation answers a different question: **is the
+server I'm talking to actually running the binary the operator
+published?**
+
+Without attestation, a wallet that's careful about wire-shape leakage
+is still trusting whoever runs the server not to swap the binary out
+for a logging one. Attestation closes that gap by binding the
+WebSocket session to a signed, hardware-attested measurement of the
+software stack.
+
+## The two-server split
+
+The reference deployment uses two servers with different roles:
+
+| Server                       | Role  | SEV-SNP | Why                                    |
+| ---------------------------- | ----- | ------- | -------------------------------------- |
+| `wss://weikeng1.bitcoinpir.org` | Hint  | No (Hetzner) | Sees only the hint blob — never query traffic. |
+| `wss://weikeng2.bitcoinpir.org` | Query | Yes (VPSBG, Tier 3) | Sees the per-query traffic — needs the strongest binding. |
+
+The query server is the one whose binary a wallet really wants to
+pin. Hint traffic alone reveals nothing about what the user is
+querying (an attacker who runs only the hint server can't replay
+queries — the secret-shared sketch lives in the *query* server's
+state).
+
+## What "Tier 3" means
+
+Tier 3 is a deployment shape: the **entire** software stack — kernel,
+initramfs, command line, server binary — is packed into a single
+**Unified Kernel Image (UKI)** that the AMD SEV-SNP firmware
+**measures** at boot. AMD's Platform Security Processor signs a
+report binding:
+
+- The launch MEASUREMENT (the 48-byte hash of OVMF + UKI bytes).
+- Per-chip identity (VCEK certificate chain rooted at AMD's ARK).
+- A REPORT_DATA field the server uses for session binding.
+
+Compare this to Slice 2 (the recovery mode) — same hardware, but
+boots a normal rootfs with `sshd` enabled. Useful for operator
+recovery, but unsuitable for production because the boot path is not
+measured.
+
+## The full verification flow
+
+A wallet that wants the strongest binding does this:
+
+```ts
+import {
+  AMD_TURIN_ARK_FINGERPRINT,
+  PIR2_TIER3_PIN,
+  PIR1_PIN,
+} from './attest-pin';
+
+const attest0 = await client.attest(0);  // hint server
+const attest1 = await client.attest(1);  // query server
+
+// --- Step 1: bind to AMD silicon (only the query server has SEV) ---
+if (attest1.sevStatus !== 'reportDataMatch') {
+  throw new Error(`SEV-SNP report did not bind: ${attest1.sevStatus}`);
+}
+
+await attest1.verifyVcekChain(AMD_TURIN_ARK_FINGERPRINT);
+// Now we know: the SEV-SNP report is signed by a real AMD Turin chip
+// whose ARK matches the operator's pin. The report itself is
+// cryptographically trustworthy.
+
+// --- Step 2: pin the operator's published values ---
+if (attest1.launchMeasurementHex !== PIR2_TIER3_PIN.measurementHex) {
+  throw new Error('Query server is running a different MEASUREMENT than expected');
+}
+if (attest1.binarySha256Hex !== PIR2_TIER3_PIN.binarySha256Hex) {
+  throw new Error('Query server binary hash drift');
+}
+
+// --- Step 3: pin the hint server too (no SEV — binary hash only) ---
+if (attest0.binarySha256Hex !== PIR1_PIN.binarySha256Hex) {
+  throw new Error('Hint server binary hash drift');
+}
+
+// --- Step 4: upgrade to the AEAD-sealed channel ---
+await client.upgradeToSecureChannel(
+  attest0.serverStaticPub,
+  attest1.serverStaticPub,
+);
+```
+
+## What's actually being verified
+
+### `verifyVcekChain`
+
+A one-shot validator that:
+
+1. Hashes the ARK PEM the server bundled and compares to your pinned
+   fingerprint. (This is the crucial step — without a pinned root, a
+   malicious server could substitute a forged self-signed "ARK"
+   that doesn't actually belong to AMD.)
+2. Confirms ARK self-signs (RSA-PSS-SHA384).
+3. Confirms ARK signs the ASK.
+4. Confirms ASK signs the VCEK.
+5. Confirms the SEV-SNP report's ECDSA-P384-SHA384 signature
+   verifies against the VCEK's pubkey.
+
+On success: the report is cryptographically authentic and your client
+has cryptographically established that the chip generating it is a
+real AMD Turin SEV-capable processor.
+
+### `launchMeasurementHex`
+
+The 48-byte hash AMD's PSP signs into every SEV-SNP report. For Tier 3
+it covers OVMF + the loaded UKI bytes — kernel, initramfs, cmdline.
+Any change to the server binary inside the initramfs **flips this
+value**.
+
+A wallet that pins this value detects:
+
+- A server upgrade the operator made without publishing a new pin.
+- A boot of the recovery (Slice 2) image instead of the Tier 3 UKI.
+- Any binary substitution by anyone with access to the hardware.
+
+### `binarySha256Hex`
+
+The SHA-256 of the running `unified_server` binary, server-self-reported.
+For Tier 3, this transitively follows from MEASUREMENT (the binary
+lives inside the initramfs, which is part of the UKI, which is part
+of MEASUREMENT). For Slice 2, the binary hash is server-self-reported
+and the operator publishes it via a separate channel.
+
+The `binarySha256Hex` is also pinnable independently — useful for the
+hint server, which is on hardware without SEV.
+
+### `sevStatus`
+
+A string enum: `noSevHost`, `reportDataMatch`, `reportDataMismatch`,
+`malformedReport`. Any value other than `reportDataMatch` means the
+self-reported fields cannot be trusted.
+
+## Operator pins
+
+The reference operator publishes pins in
+[`web/src/attest-pin.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/attest-pin.ts).
+For wallets shipping with the reference deployment, bake those values
+into your bundle at build time. The expected values as of 2026-05-19
+(check the linked file for the latest):
+
+```ts
+// AMD Turin family ARK fingerprint — same across all Turin chips
+AMD_TURIN_ARK_FINGERPRINT_HEX =
+  '1f084161a44bb6d93778a904877d4819cafa5d05ef4193b2ded9dd9c73dd3f6a';
+
+// pir2 (query server) — Tier 3 UKI v17, SEV-SNP
+PIR2_TIER3_PIN = {
+  measurementHex:
+    '6dcbfa45baa345ce5fabdddbc7386d43c31b3dbf1fd75402a112d303299c2428b2c0d0bf6a01325da87292ae69f2aa2a',
+  binarySha256Hex:
+    '3925cc4d5c4e45d8d3c8d798afb471905f909751d5c15ad5cccb22eb2631d2d5',
+};
+
+// pir1 (hint server) — Hetzner i7-8700, no SEV (binary hash only)
+PIR1_PIN = {
+  binarySha256Hex:
+    '3925cc4d5c4e45d8d3c8d798afb471905f909751d5c15ad5cccb22eb2631d2d5',
+};
+```
+
+Both servers run the same reproducible binary
+(`nix build .#unified-server`). `pir2` runs `--serve-queries` only
+(no hint pool, no OnionPIR); `pir1` runs the hint role.
+
+## What happens after the channel is upgraded
+
+`upgradeToSecureChannel` wraps both WebSocket connections in an AEAD
+frame layer (ChaCha20-Poly1305). After this:
+
+- Every PIR request and response is sealed end-to-end with a key
+  derived from the X25519 ECDH between the client's ephemeral key
+  and the server's static key.
+- Cloudflared (the operator's TLS terminator), an ISP-level
+  observer, or any other middlebox sees only ciphertext + framing
+  metadata.
+- A future re-key requires a new `attest()` round trip.
+
+This is **defense in depth on top of TLS** — TLS already encrypts in
+transit, but its certificate identity comes from a CA, not from
+hardware attestation. The AEAD layer binds the session to the
+attested binary directly.
+
+## Skipping attestation
+
+For development against the live server, you can skip attestation —
+the wire still uses WSS, and the SDK still enforces the [four
+privacy invariants](/docs/privacy/invariants). What you lose is the
+binding to a *specific known binary*. Use this only for local
+prototyping; production wallets should pin.
+
+## Rotating pins
+
+When the operator deploys a new binary:
+
+1. The operator runs `bpir-admin attest wss://weikeng2.bitcoinpir.org`
+   against the new deployment to capture the new MEASUREMENT and
+   `binary_sha256`.
+2. The pin file is updated in the reference repo (this is `web/src/attest-pin.ts`).
+3. Wallets ship a new bundle.
+
+Wallets that don't update will refuse the new server — which is the
+correct behaviour from a security perspective. The operator must
+either coordinate a rolling rollout with bundled wallets, or maintain
+**multiple acceptable pins** during a transition (the SDK doesn't
+provide multi-pin acceptance out of the box; the wallet wraps it).
+
+## Where to go next
+
+- [The four invariants](/docs/privacy/invariants) — what the wire
+  shape doesn't leak.
+- [Operations / endpoints](/docs/operations/endpoints) — the
+  pir1/pir2 split and the WebSocket-only contract.
+- [Quickstart](/docs/quickstart) — the minimal happy-path
+  integration (attestation flow at the end).

@@ -1,0 +1,172 @@
+# OnionPIR protocol
+
+OnionPIR is the **single-server** backend. Privacy does not depend
+on two non-colluding servers — instead, it depends on the semantic
+security of the BFV homomorphic-encryption scheme (Microsoft SEAL).
+The client encrypts its query under its own public key; the server
+performs the lookup homomorphically and returns a ciphertext the
+client decrypts.
+
+For the framing envelope shared across all backends see
+[Wire format](/docs/protocol/wire-format).
+
+<Callout kind="warn" title="No WASM client">
+OnionPIR depends on Microsoft SEAL (C++), which does not compile to
+`wasm32-unknown-unknown`. The browser SDK
+([`pir-sdk-wasm`](/docs/sdk/typescript)) does not include
+`WasmOnionClient`. The reference web app uses a hand-rolled
+TypeScript port of the protocol —
+[`web/src/onionpir_client.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/onionpir_client.ts).
+Native Rust callers can use `pir-sdk-client::onion::OnionClient`
+behind the `onion` cargo feature.
+</Callout>
+
+## Conceptual flow
+
+```text
+┌───────────────┐                            ┌──────────────────┐
+│ Client        │                            │ OnionPIR server  │
+│ (BFV public + │                            │                  │
+│ secret key)   │                            │                  │
+└───────┬───────┘                            └─────────┬────────┘
+        │  (1) REQ_REGISTER_KEYS                       │
+        │      [GSW(s), gal_keys, …]                   │
+        ├─────────────────────────────────────────────►│
+        │                                              │
+        │  (2) per-query ciphertext                    │
+        │      enc(query_index)                        │
+        ├─────────────────────────────────────────────►│
+        │                                              │
+        │  RESP                                        │
+        │      enc(answer)                             │
+        │◄─────────────────────────────────────────────│
+        │                                              │
+        │  (3) Merkle sibling + tree-top queries       │
+        │      (per-bin proof)                         │
+        ├──────────────────► ◄─────────────────────────│
+```
+
+## Database layout
+
+Same conceptual two-layer structure as DPF — INDEX and CHUNK tables
+— but the table topology is different. Each PBC group is a **dense
+linear table** the server iterates homomorphically. Within a group,
+the OnionPIR ciphertext encodes the target row; the server emits a
+ciphertext whose plaintext is the row contents.
+
+## Phase 1: register keys
+
+Before queries, the client uploads its public-key material:
+
+- The BFV public key (for the homomorphic encryption).
+- The Galois keys (for the rotation operations the server uses to
+  pack the response).
+- The GSW-encoded secret-key bits (for the FHE expansion step).
+
+The server stores these in a per-session keystore. Older sessions are
+evicted on an LRU basis if the keystore exceeds its budget. If your
+session's keys are evicted, the SDK transparently re-uploads on the
+next query — but you'll pay the latency.
+
+## Phase 2: per-query
+
+### Group selection
+
+Same PBC mechanic as DPF: the script hash derives 3 candidate groups,
+the planner picks one. The cuckoo position within the chosen group is
+encrypted in the query.
+
+### Frame
+
+The OnionPIR per-query frame carries one ciphertext per probed bin.
+Because OnionPIR doesn't batch within a frame the way DPF/Harmony do,
+the wire shape is different — a multi-script-hash sync issues
+multiple independent per-script-hash query frames, **pipelined** but
+not batched.
+
+The wire still respects the [four
+invariants](/docs/privacy/invariants):
+
+- Two cuckoo positions probed per INDEX query → 2 frames per query.
+- A CHUNK round always follows the INDEX phase, even for not-found
+  (one fully synthetic empty round substitutes).
+- The Merkle phase emits per-bin sibling queries unconditionally.
+
+## Phase 3: Merkle proof
+
+OnionPIR publishes a per-bin Merkle commitment at arity 120, split
+into two trees per group:
+
+- **INDEX tree** — covers every INDEX bin in the group.
+- **DATA tree** — covers every CHUNK bin in the group.
+
+The variants are:
+
+| Code   | Request                                | Response                                |
+| ------ | -------------------------------------- | --------------------------------------- |
+| `0x53` | `REQ_ONIONPIR_MERKLE_INDEX_SIBLING`    | `RESP_ONIONPIR_MERKLE_INDEX_SIBLING`    |
+| `0x54` | `REQ_ONIONPIR_MERKLE_INDEX_TREE_TOP`   | `RESP_ONIONPIR_MERKLE_INDEX_TREE_TOP`   |
+| `0x55` | `REQ_ONIONPIR_MERKLE_DATA_SIBLING`     | `RESP_ONIONPIR_MERKLE_DATA_SIBLING`     |
+| `0x56` | `REQ_ONIONPIR_MERKLE_DATA_TREE_TOP`    | `RESP_ONIONPIR_MERKLE_DATA_TREE_TOP`    |
+
+The sibling-batch queries use a 6-hash sibling cuckoo
+(`ONIONPIR_MERKLE_SIBLING_CUCKOO_NUM_HASHES = 6`) with `group_size =
+1` — denser than the per-bucket Merkle scheme used by DPF/Harmony, to
+keep the per-query proof small.
+
+Even for an all-not-found batch, the Merkle verifier (`verify_sub_tree`
+/ `verifySubTree`) emits at least one all-dummy DATA sibling pass to
+preserve [Invariant 2](/docs/privacy/invariants).
+
+## OnionPIR-specific operations
+
+These cost more than the DPF/Harmony equivalents — they're the FHE
+overhead:
+
+- **Initial key registration.** First-time setup adds a few hundred
+  KB to a few MB of upload, depending on parameter set.
+- **Per-query ciphertext.** Each INDEX/CHUNK ciphertext is ~tens of
+  KB.
+- **Server compute.** The server runs homomorphic operations across
+  the full group's plaintext; this is the slow path.
+
+The reference deployment runs the HEXL-accelerated OnionPIR engine
+(Intel HEXL via the unified server binary) — see the operator
+binary's reproducible Nix build for what's running.
+
+## Privacy properties
+
+OnionPIR's privacy comes from BFV's IND-CPA security, not from a
+two-server non-collusion assumption. A single malicious server
+**cannot** distinguish queries — the ciphertexts are
+indistinguishable from uniform under the LWE assumption.
+
+The [four invariants](/docs/privacy/invariants) hold for OnionPIR
+too. The relevant code paths are:
+
+- Two-cuckoo-position INDEX probing → `pir-sdk-client/src/onion.rs`'s
+  `items_from_trace`.
+- CHUNK round-presence padding → `query_chunk_level` (Rust) and
+  `queryBatch` (standalone TS) substitute a single empty round
+  (`chunkRounds = [[]]`) when the batch is all-not-found.
+- INDEX Merkle group-symmetry → the standalone TS client uses a
+  per-group Merkle layer with ARITY=120; the per-group placement is
+  structurally trivial regardless of input.
+
+## Implementation reference
+
+- Standalone TS: [`web/src/onionpir_client.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/onionpir_client.ts)
+- Rust client: [`pir-sdk-client/src/onion.rs`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/pir-sdk-client/src/onion.rs)
+  (feature `onion`)
+- OnionPIRv2 core: [`OnionPIRv2-fork`](https://github.com/Bitcoin-PIR/OnionPIRv2-fork)
+- Per-group Merkle: `onion_merkle::verify_sub_tree` (Rust) /
+  `verifySubTree` (standalone TS)
+
+## Where to go next
+
+- [Wire format](/docs/protocol/wire-format) — the framing envelope.
+- [DPF protocol](/docs/protocol/dpf) — the two-server alternative.
+- [Backend comparison](/docs/concepts/backends) — when to pick
+  OnionPIR over DPF/Harmony.
+- [Privacy invariants](/docs/privacy/invariants) — what's enforced
+  across all three backends.

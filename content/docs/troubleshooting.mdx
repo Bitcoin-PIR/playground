@@ -1,0 +1,205 @@
+# Troubleshooting
+
+Common errors and what they mean. If you hit something not on this
+list, the [main repo's issue
+tracker](https://github.com/Bitcoin-PIR/Bitcoin-PIR/issues) is the
+canonical place to ask.
+
+## Connection errors
+
+### `WebSocket connection failed` / `1006 abnormal closure`
+
+The endpoint rejected the WebSocket upgrade, or the connection
+dropped mid-frame. Things to check:
+
+- **URL scheme.** Both endpoints are `wss://` only. Plain `ws://`,
+  `https://`, or `http://` will not work.
+- **Pinned origin.** Some browser-extension CSPs block WebSocket
+  connections to arbitrary hosts. Verify `connect-src wss://*.bitcoinpir.org`
+  is in your manifest.
+- **CORS.** WebSocket isn't subject to CORS pre-flight, but a
+  browser will still enforce content-security policies. A "blocked
+  by CSP" error in DevTools is the give-away.
+- **Server status.** Try `wscat -c wss://weikeng1.bitcoinpir.org` —
+  if `wscat` can't connect either, the server is down.
+
+### `502 Bad Gateway` (HTTP)
+
+You're hitting the endpoint with a plain HTTP request. That's the
+correct response. The endpoint accepts WebSocket upgrades **only**;
+plain HTTP returns 502 by design. See
+[Endpoints — WebSocket-only](/docs/operations/endpoints).
+
+### `WSS connection works but immediately closes after handshake`
+
+The server accepted the upgrade but rejected the first PIR frame.
+Common causes:
+
+- Wrong server URL for the role (e.g. you sent
+  `REQ_HARMONY_BATCH_QUERY` to the hint server). See [Endpoints —
+  per-backend routing](/docs/operations/endpoints).
+- The client is sending an unknown variant code. Check the SDK
+  version against the server's version.
+- Rate-limited via ARC or Cashu auth — the server expects a
+  credential present before queries.
+
+## Sync errors
+
+### `merkleVerified: false`
+
+The per-bucket Merkle proof reconstruction did not match the
+published root. **Treat the slot as untrusted — do not display the
+returned UTXOs to the user.**
+
+Common causes:
+
+- **Server bug.** A recent server deploy may have a corrupted
+  Merkle tree. File an issue with the script hash, the `db_id`, and
+  the server's `binary_sha256` (from `attest()`).
+- **Client/server version mismatch.** The Merkle scheme has had
+  major revisions (arity, layout). Check the SDK version against
+  the server's version.
+- **Network corruption.** Rare with WSS, but theoretically a
+  middlebox could corrupt the response. A retry usually clears it.
+
+A wallet UI should:
+
+1. Log the failed `(scriptHash, dbId, error)` tuple.
+2. Surface a warning to the user.
+3. Optionally retry the query — but do not silently swallow.
+
+### `not found` for a script hash that should have UTXOs
+
+If your address is not in the result and you expect it to be:
+
+- **Confirm the script hash derivation.** The SDK takes
+  `HASH160(scriptPubKey)`. For BIP86 (P2TR), this is the *tweaked*
+  pubkey's HASH160, not the raw HASH160. For BIP84 (P2WPKH), it's
+  `HASH160(redeem_script)`. Easy place to get wrong.
+- **Confirm the height.** A fresh address that received funds in
+  block 900,001 won't be visible until the snapshot covering that
+  height is published. Check `syncResult.syncedHeight` against the
+  expected block height.
+- **Confirm the database `db_id`.** A snapshot DB only covers up to
+  its baseline height; delta DBs cover increments. The SDK
+  orchestrates this via `computeSyncPlan`; if you're querying
+  manually, check you've covered the chain.
+
+### `Hints exhausted` (HarmonyPIR)
+
+The per-group hint budget is `T - 1` queries. When it's exhausted,
+the next query rejects.
+
+```ts
+if (client.minQueriesRemaining() !== undefined &&
+    client.minQueriesRemaining()! < 5) {
+  // Refresh proactively
+  await client.fetchHintsWithProgress(catalog, dbId, progress);
+}
+```
+
+Or catch the error and refresh on demand:
+
+```ts
+try {
+  await client.sync(packed, lastHeight);
+} catch (e) {
+  if (`${e}`.includes('hints exhausted')) {
+    await client.fetchHintsWithProgress(catalog, dbId, progress);
+    return client.sync(packed, lastHeight);
+  }
+  throw e;
+}
+```
+
+## Attestation errors
+
+### `sevStatus: noSevHost`
+
+The server's host is not SEV-SNP-capable. Expected for the hint
+server (`pir1`). If you see this on `pir2`, the operator switched it
+to Slice 2 (recovery mode) — see the [attestation walkthrough](/docs/privacy/attestation).
+
+### `sevStatus: reportDataMismatch`
+
+The SEV-SNP report's REPORT_DATA does not match what the client
+computed. This means the server-self-reported fields are not
+internally consistent with the chip-signed report — treat the server
+as compromised. Refuse to upgrade the channel.
+
+### `verifyVcekChain` rejects
+
+The bundled certificate chain doesn't root at the operator-pinned
+ARK. Could be:
+
+- The operator rotated the ARK pin and you haven't bundled the new
+  pin yet (very rare — ARKs have ~25-year validity).
+- The server bundled a forged cert chain. **Stop trusting this
+  server.**
+
+### `MEASUREMENT does not match pin`
+
+The query server is running a different UKI image than the operator
+published. Could be:
+
+- The operator deployed a new image and hasn't updated the public
+  pin yet — coordinate with the operator before trusting.
+- The operator rebooted into Slice 2 (recovery mode) — different
+  boot path, different MEASUREMENT.
+- The server is **not running the binary the operator says it is**.
+
+For a production wallet, refuse to use the server until the
+MEASUREMENT matches a known good value.
+
+## WASM / browser errors
+
+### `RuntimeError: unreachable` (or panic with no message)
+
+You're running an older `pir-sdk-wasm` that didn't install the
+browser panic hook. Update to the latest, or call `__wasm_init()`
+manually after `init()`.
+
+### `init()` resolves but the module crashes on first call
+
+Some bundlers (Webpack, Vite) need `asyncWebAssembly` experiments
+enabled. The Next.js config in the playground shows the canonical
+shape — `config.experiments = { ...config.experiments,
+asyncWebAssembly: true }`.
+
+### Large bundle size
+
+The WASM module is ~1 MB compressed. To reduce:
+
+- Code-split the SDK so it only loads on the wallet-sync screen.
+- For browsers that only need DPF, build the WASM with the `dpf-only`
+  feature (drops the HarmonyPIR code paths). Not currently exposed in
+  the published wasm-pack output — file an issue if you need it.
+
+## Performance issues
+
+### Sync takes seconds for a single address
+
+This is normal for a fresh sync — the full snapshot is ~hundreds of
+MBs of cuckoo tables on the server, and a single DPF round still has
+to evaluate against the whole database. Subsequent delta syncs are
+much faster.
+
+For long-lived sessions, switch to [HarmonyPIR](/docs/protocol/harmonypir)
+— after the offline phase, each query amortises to milliseconds.
+
+### Browser UI freezes during sync
+
+The WASM SDK does CPU-bound work in the main thread. For large
+syncs (>500 addresses), run the SDK in a Web Worker — the WASM
+module is worker-compatible. The reference web app uses the main
+thread for simplicity; production wallets should isolate.
+
+## Where to go next
+
+- [Quickstart](/docs/quickstart) — the happy path.
+- [Privacy invariants](/docs/privacy/invariants) — what should and
+  shouldn't be on the wire (regression checks).
+- [Wire format](/docs/protocol/wire-format) — for debugging at the
+  frame level.
+- [Endpoints](/docs/operations/endpoints) — server roles and
+  connection requirements.

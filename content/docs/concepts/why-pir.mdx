@@ -1,0 +1,125 @@
+# Why PIR
+
+If you run a Bitcoin wallet, you have a privacy problem you may not
+have noticed. This page explains it, then sketches how PIR fixes it.
+
+## The address-watching leak
+
+To show a user their balance, a wallet needs to know which UTXOs are
+held by which of their addresses. The wallet has a list of addresses
+— typically derived from an xpub — and asks a server "for each of
+these addresses, what UTXOs do you see?"
+
+In the standard Electrum protocol, that's roughly:
+
+```text
+client → server: blockchain.scripthash.subscribe <hash160(scriptPubKey)>
+server → client: [list of UTXOs, txid+vout+amount]
+```
+
+The wallet sends *the script hash itself*. The server logs it.
+
+That seems unavoidable — the server has to know what to look up. But
+think about what the log says over time:
+
+- Every address derived from your xpub, in the order your wallet
+  asks about them.
+- The IP address (or circuit, or onion exit) you connect from.
+- The clustering structure across re-connections — same xpub today,
+  same xpub next month.
+
+A curious server operator, a subpoena reader, a coffee-shop WiFi
+observer running an `mitmproxy` against an unencrypted wallet
+backend, a credit-rating company that bought the logs — any of them
+gets a complete watchlist of the user's wallet activity. **Chain
+analysis takes that and connects it to every transaction the user
+ever made**, because the script hashes are the bridge between the
+wallet view and the on-chain record.
+
+This is not theoretical. Electrum-style infrastructure exposes
+exactly this surface; the Electrum project itself has documented it.
+Hardware wallets that "connect to your favourite Electrum server"
+inherit the leak. Light wallets that hit a JSON-RPC at a vendor's
+backend inherit it. Even Tor doesn't fix it — it hides *who* is
+querying, but not *what* is queried, and the queries themselves are
+often enough to deanonymize.
+
+## What PIR does
+
+A **Private Information Retrieval** protocol lets a client retrieve
+one row from a database held by a server, **without the server
+learning which row**. The classic 2-server formulation gives you that
+guarantee unconditionally — as long as the two servers don't collude,
+neither can guess the row from its share of the query.
+
+Bitcoin PIR specialises this for the wallet use case:
+
+- The database is the **UTXO set**, indexed by `HASH160(scriptPubKey)`
+  (i.e. script hashes — the same key Electrum uses).
+- The query is a single script hash; the answer is the UTXO list.
+- The protocol enforces **batch queries** and **deterministic
+  padding** so that a wallet syncing many addresses at once doesn't
+  leak how many it actually cares about.
+- Multiple databases are stitched together — a full snapshot plus a
+  chain of deltas — so an incremental sync after a day or a week is
+  cheap.
+
+The "two-server" formulation isn't the only option. Bitcoin PIR
+supports three backends with different trade-offs — see
+[backend comparison](/docs/concepts/backends) — but all three give the
+same end-user guarantee: **the server cannot tell which script
+hash you queried**.
+
+## What stays the same
+
+PIR is a swap-in for the wallet's lookup layer. It does not change:
+
+- The on-chain protocol. PIR is an off-chain lookup.
+- The wallet's derivation path. You still derive script hashes the
+  same way.
+- The shape of the answer. You still get a list of UTXOs.
+- Block confirmation, fee estimation, broadcasting transactions —
+  none of these go through PIR. Use any normal mempool / broadcast
+  service.
+
+## What changes
+
+The visible cost:
+
+- A wallet sync sends more bytes than a comparable Electrum sync —
+  the [INDEX](/docs/protocol/dpf) and CHUNK rounds are
+  K-padded to fixed sizes.
+- Initial sync latency on the order of seconds (HarmonyPIR's offline
+  phase is a few seconds; subsequent queries amortise).
+- A WASM module to load in the browser (~1 MB).
+
+The invisible cost:
+
+- The wallet must trust *no* server to keep a watchlist — which is
+  the point.
+
+## When PIR is overkill
+
+Three honest counter-cases:
+
+- **The wallet runs its own full node.** Then there's no remote
+  server to query against; the leak doesn't exist. Use the node.
+- **The user already accepts a per-query subpoena risk.** Some users
+  knowingly use a custodial wallet whose backend already sees
+  everything. PIR is incremental privacy work; if a user has bigger
+  leaks elsewhere, fix those first.
+- **The wallet is a single-address gift card.** A wallet with one
+  pre-printed address can be sync'd without PIR by anyone who knows
+  the address — the address is already public.
+
+For every other wallet — and especially for hot wallets where the
+user's xpub is the privacy boundary — PIR is the smallest change
+that moves the wallet from "leaks to the server" to "doesn't".
+
+## Where to go next
+
+- [Backend comparison](/docs/concepts/backends) — choose between the
+  three backends.
+- [Quickstart](/docs/quickstart) — DPF integration in ten minutes.
+- [The four invariants](/docs/privacy/invariants) — the precise
+  privacy claim.

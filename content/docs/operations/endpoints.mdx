@@ -1,0 +1,169 @@
+# Live endpoints
+
+The Bitcoin PIR reference deployment runs two servers — `pir1` and
+`pir2` — with deliberately different roles. Wallets connect to both;
+the [SDK](/docs/sdk/typescript) handles the routing.
+
+## The two roles
+
+| Endpoint                          | Short name | Role            | Hardware              | SEV-SNP |
+| --------------------------------- | ---------- | --------------- | --------------------- | ------- |
+| `wss://weikeng1.bitcoinpir.org`   | pir1       | **Hint server** | Hetzner i7-8700       | No      |
+| `wss://weikeng2.bitcoinpir.org`   | pir2       | **Query server**| VPSBG (Tier 3 UKI)    | Yes     |
+
+This split is intentional. The query server — the one that sees the
+per-query traffic — runs on attested hardware with the strongest
+binding (see [Attestation](/docs/privacy/attestation)). The hint
+server runs on commodity hardware because the hint blob alone reveals
+nothing about which addresses are queried.
+
+```text
+                  ┌───────────────────────────┐
+                  │ pir1 (Hetzner, no SEV)    │
+                  │   - hints                 │
+                  │   - DPF server 0          │
+                  └─────────────┬─────────────┘
+                                │
+                                │  no per-query traffic from
+                                │  HarmonyPIR clients
+                                │
+┌──────────┐                    │
+│  Wallet  │────────────────────┤
+└──────────┘                    │
+                                │  per-query traffic from
+                                │  DPF & HarmonyPIR & OnionPIR
+                                │
+                  ┌─────────────▼─────────────┐
+                  │ pir2 (VPSBG, SEV-SNP)     │
+                  │   - DPF server 1          │
+                  │   - HarmonyPIR query srv  │
+                  │   - OnionPIR              │
+                  │     (not in v17 — pir1)   │
+                  └───────────────────────────┘
+```
+
+## WebSocket-only
+
+Both endpoints are **WebSocket-only**. A plain HTTP `GET /` returns
+502 by design — there is no HTTP fallback, no JSON-RPC layer, no
+SSE.
+
+Health-checking from the outside requires a real WebSocket handshake
+(`Upgrade: websocket`, etc.) followed by a `REQ_PING` (`0x00`) frame.
+A normal `curl` or `wget` will not work.
+
+<Callout kind="warn" title="curl will not work">
+Probing these endpoints with plain HTTP returns 502. The endpoint is
+healthy if it returns 502 to HTTP and accepts a WebSocket upgrade.
+Use a WS-aware probe like `wscat` if you need to test from the
+command line.
+</Callout>
+
+## Per-backend routing
+
+Each backend uses the two endpoints differently:
+
+### DPF
+
+Connect to **both** servers. Server 0 = pir1, server 1 = pir2.
+
+```ts
+new WasmDpfClient(
+  'wss://weikeng1.bitcoinpir.org',   // server 0 (Hetzner)
+  'wss://weikeng2.bitcoinpir.org',   // server 1 (VPSBG, SEV)
+);
+```
+
+Order matters cryptographically only in that the two share-keys are
+labelled "server 0" and "server 1"; either ordering is correct as
+long as the wallet is consistent.
+
+### HarmonyPIR
+
+Connect to both, but the role is asymmetric:
+
+```ts
+new WasmHarmonyClient(
+  'wss://weikeng1.bitcoinpir.org',   // hint server
+  'wss://weikeng2.bitcoinpir.org',   // query server
+);
+```
+
+The hint server (`pir1`) only sees `REQ_HARMONY_HINTS` traffic. The
+query server (`pir2`) sees per-query frames.
+
+### OnionPIR
+
+OnionPIR is single-server. Connect to whichever server hosts
+OnionPIR. In the current reference deployment that's `pir1` — `pir2`
+runs `--serve-queries` only and does not serve OnionPIR. Check
+[attest-pin.ts](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/attest-pin.ts)
+for the canonical config.
+
+## Reading from the right server
+
+For DPF and HarmonyPIR, the SDK enforces the role. You can't ask
+`pir1` for a per-query response — it's the hint server and rejects
+unknown variants.
+
+For OnionPIR, the wallet picks the endpoint manually.
+
+## Server info / catalog
+
+Both servers respond to:
+
+```text
+REQ_GET_INFO      (0x01)  → RESP_INFO        (database parameters)
+REQ_GET_DB_CATALOG (0x02) → RESP_DB_CATALOG  (full per-DB catalog)
+REQ_PING          (0x00)  → RESP_PONG        (health check)
+REQ_ATTEST        (admin) → REPORT bytes     (see Attestation)
+```
+
+The SDK fetches the catalog automatically as part of `connect()` /
+`sync()`. For manual inspection use:
+
+```ts
+const catalog = await client.fetchCatalog();
+console.log(catalog.toJson());
+```
+
+The catalog lists every database the server hosts — typically the
+full UTXO snapshot at some height, plus a chain of delta databases
+covering blocks since.
+
+## TLS termination
+
+Both endpoints are fronted by `cloudflared` running on the host.
+TLS is terminated at the tunnel; the WebSocket is then forwarded
+to the local `unified_server` binary on a loopback port.
+
+This means:
+
+- The CA-issued TLS certificate on the public URL is what your
+  browser sees. Use it for the standard browser-level
+  authentication.
+- For binding to the *binary* (not just the TLS cert), use the
+  [attestation flow](/docs/privacy/attestation) — `upgradeToSecureChannel`
+  wraps the WebSocket in an AEAD layer keyed to the attested
+  server static key.
+
+## Running your own
+
+If you're deploying the reference servers yourself, see:
+
+- [`pir-sdk-server`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/pir-sdk-server)
+  — the publishable server wrapper.
+- The `unified_server` binary built by `nix build .#unified-server`
+  is the production binary.
+- The `flake.nix` `tier3-uki` derivation is the UKI build (for
+  SEV-SNP deployments).
+- Operator runbook lives in
+  [`docs/PHASE3_ROADMAP.md`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/docs/PHASE3_ROADMAP.md).
+
+## Where to go next
+
+- [Attestation](/docs/privacy/attestation) — pinning the running
+  binary on `pir2`.
+- [Wire format](/docs/protocol/wire-format) — the WebSocket frame
+  layout both endpoints speak.
+- [Troubleshooting](/docs/troubleshooting) — connection issues.
