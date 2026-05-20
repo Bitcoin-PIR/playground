@@ -1,0 +1,34 @@
+{
+  "name": "pir-sdk-wasm",
+  "type": "module",
+  "collaborators": [
+    "Bitcoin PIR contributors"
+  ],
+  "description": "WASM bindings for the PIR SDK: sync planning, delta merging, Merkle verification, and async DPF + HarmonyPIR clients",
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Bitcoin-PIR/Bitcoin-PIR"
+  },
+  "files": [
+    "pir_sdk_wasm_bg.wasm",
+    "pir_sdk_wasm.js",
+    "pir_sdk_wasm.d.ts",
+    "LICENSE-APACHE",
+    "LICENSE-MIT"
+  ],
+  "main": "pir_sdk_wasm.js",
+  "homepage": "https://github.com/Bitcoin-PIR/Bitcoin-PIR",
+  "types": "pir_sdk_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "pir",
+    "privacy",
+    "bitcoin",
+    "wasm",
+    "webassembly"
+  ]
+}
