@@ -59,13 +59,30 @@ export function HarmonyTCheck({ frames }: Props) {
     }
 
     let decodeError: string | null = null;
-    const perFrame: { seq: number; counts: number[] }[] = [];
+    // Per-frame entry: counts + intra-frame uniformity. The privacy
+    // invariant is per-segment-class (each batch frame carries one
+    // class, so all groups WITHIN a frame share T) — different frames
+    // (INDEX vs CHUNK vs each Merkle level) legitimately have different
+    // T values. Check intra-frame, not global.
+    const perFrame: {
+      seq: number;
+      counts: number[];
+      distinct: number[];
+      ok: boolean;
+    }[] = [];
 
     if (decoder) {
       for (const f of batchFrames) {
         try {
           const u = decoder(f.rawBytes!);
-          perFrame.push({ seq: f.seq, counts: Array.from(u) });
+          const counts = Array.from(u);
+          const distinct = [...new Set(counts)];
+          perFrame.push({
+            seq: f.seq,
+            counts,
+            distinct,
+            ok: distinct.length === 1,
+          });
         } catch (e) {
           decodeError = `frame seq=${f.seq}: ${(e as Error).message}`;
           break;
@@ -73,8 +90,10 @@ export function HarmonyTCheck({ frames }: Props) {
       }
     }
 
-    const allCounts = perFrame.flatMap((p) => p.counts);
-    const distinct = [...new Set(allCounts)];
+    const allFramesPass = perFrame.length > 0 && perFrame.every((p) => p.ok);
+    const distinctTValues = [...new Set(perFrame.map((p) => p.distinct[0]))]
+      .filter((v) => v !== undefined)
+      .sort((a, b) => a - b);
 
     const singularSizes = singularFrames.map((f) => f.size);
     const singularDistinct = [...new Set(singularSizes)];
@@ -83,8 +102,8 @@ export function HarmonyTCheck({ frames }: Props) {
       decodeError,
       batchFrameCount: batchFrames.length,
       perFrame,
-      allCountsTotal: allCounts.length,
-      distinctCounts: distinct,
+      allFramesPass,
+      distinctTValues,
       singularFrameCount: singularFrames.length,
       singularSizes: singularDistinct,
     };
@@ -118,8 +137,9 @@ export function HarmonyTCheck({ frames }: Props) {
         {result && result.batchFrameCount > 0 && !result.decodeError && (
           <BatchCard
             frames={result.batchFrameCount}
-            total={result.allCountsTotal}
-            distinct={result.distinctCounts}
+            allPass={result.allFramesPass}
+            distinctTValues={result.distinctTValues}
+            perFrame={result.perFrame}
           />
         )}
 
@@ -136,43 +156,62 @@ export function HarmonyTCheck({ frames }: Props) {
 
 function BatchCard({
   frames,
-  total,
-  distinct,
+  allPass,
+  distinctTValues,
+  perFrame,
 }: {
   frames: number;
-  total: number;
-  distinct: number[];
+  allPass: boolean;
+  distinctTValues: number[];
+  perFrame: { seq: number; counts: number[]; distinct: number[]; ok: boolean }[];
 }) {
-  const ok = distinct.length === 1;
+  const failures = perFrame.filter((p) => !p.ok);
   return (
     <div
       className={`rounded border p-2 ${
-        ok
+        allPass
           ? 'border-emerald-200 dark:border-emerald-900'
           : 'border-red-200 dark:border-red-900'
       }`}
     >
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-baseline justify-between gap-2">
         <span className="font-mono">0x43 HARMONY_BATCH_QUERY</span>
         <span
           className={
-            ok
+            allPass
               ? 'text-emerald-600 dark:text-emerald-400'
               : 'text-red-600 dark:text-red-400'
           }
         >
-          {ok
-            ? `PASS — count = ${distinct[0]} (= T−1) across ${total} groups in ${frames} frame(s)`
-            : `FAIL — distinct counts: {${distinct.join(', ')}} across ${total} groups`}
+          {allPass
+            ? `PASS — ${frames}/${frames} frames internally uniform`
+            : `FAIL — ${failures.length}/${frames} frames have intra-frame count drift`}
         </span>
       </div>
       <div className="mt-1 text-zinc-500">
-        Decoded via wasm-bindgen{' '}
-        <code className="font-mono">harmony_decode_counts</code>; each frame&apos;s
-        per-group <code className="font-mono">indices.len()</code> is extracted and
-        compared. Privacy invariant requires a single distinct value (the constant
-        T−1) across all groups, all frames, all rounds.
+        Each batch frame carries one segment class (INDEX / CHUNK / a specific
+        Merkle level); within a frame all groups share T, so the privacy
+        invariant requires <em>intra-frame</em> count uniformity. Different
+        frames legitimately use different T values for different segment sizes.
       </div>
+      <div className="mt-2 font-mono text-[11px] text-zinc-600 dark:text-zinc-400">
+        Observed T−1 values across {frames} frames: {'{'}
+        {distinctTValues.join(', ')}
+        {'}'}
+        {distinctTValues.length > 1 &&
+          ` — ${distinctTValues.length} distinct segment classes`}
+      </div>
+      {failures.length > 0 && (
+        <ul className="mt-2 list-disc pl-5 text-[11px] text-red-700 dark:text-red-300">
+          {failures.slice(0, 3).map((f) => (
+            <li key={f.seq}>
+              frame seq={f.seq}: distinct counts = {'{'}
+              {f.distinct.join(', ')}
+              {'}'}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
