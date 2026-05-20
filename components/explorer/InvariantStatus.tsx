@@ -28,6 +28,19 @@ const STATE_TEXT: Record<InvariantResult['state'], string> = {
   'n/a': 'text-zinc-500',
 };
 
+const OVERALL_LABEL = {
+  pass: { text: 'ALL PASS', cls: 'text-emerald-600 dark:text-emerald-400' },
+  fail: { text: 'FAIL', cls: 'text-red-600 dark:text-red-400' },
+  pending: { text: 'AWAITING DATA', cls: 'text-amber-600 dark:text-amber-400' },
+  'no-data': { text: 'no traffic yet', cls: 'text-zinc-500' },
+  na: { text: 'no applicable checks', cls: 'text-zinc-500' },
+} as const;
+
+function OverallBadge({ overall }: { overall: keyof typeof OVERALL_LABEL }) {
+  const { text, cls } = OVERALL_LABEL[overall];
+  return <div className={`text-xs font-semibold ${cls}`}>{text}</div>;
+}
+
 export function InvariantStatus({ report }: Props) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -35,21 +48,7 @@ export function InvariantStatus({ report }: Props) {
     <div className="rounded-lg border border-zinc-200 dark:border-zinc-800">
       <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">
         <div className="text-sm font-semibold">Privacy invariants</div>
-        <div
-          className={`text-xs font-semibold ${
-            report.allPass
-              ? 'text-emerald-600 dark:text-emerald-400'
-              : report.hasFrames
-                ? 'text-amber-600 dark:text-amber-400'
-                : 'text-zinc-500'
-          }`}
-        >
-          {report.allPass
-            ? 'ALL PASS'
-            : report.hasFrames
-              ? 'AWAITING DATA / FAIL'
-              : 'no traffic yet'}
-        </div>
+        <OverallBadge overall={report.overall} />
       </div>
 
       <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">

@@ -59,12 +59,41 @@ export interface InvariantResult {
   detail: Array<{ label: string; value: string; ok?: boolean }>;
 }
 
+/**
+ * Top-level verdict for the whole report.
+ * - `pass`    — every applicable invariant is `pass`
+ * - `fail`    — at least one invariant is `fail` (overrides `pending`)
+ * - `pending` — no failures, but at least one invariant is still
+ *               waiting on data (e.g. CHUNK round hasn't fired yet)
+ * - `no-data` — no frames captured at all
+ * - `na`      — frames present, but every invariant is `n/a` for
+ *               this backend / traffic shape
+ */
+export type InvariantOverall = 'pass' | 'fail' | 'pending' | 'no-data' | 'na';
+
 export interface InvariantReport {
   results: InvariantResult[];
   /** True iff every non-`n/a` invariant is `pass`. */
   allPass: boolean;
   /** Whether anything has been observed at all. */
   hasFrames: boolean;
+  /** Single derived verdict; prefer this over allPass for UI labels. */
+  overall: InvariantOverall;
+}
+
+/**
+ * Optional context passed to `checkInvariants`. WASM-bound decoders go
+ * here; without them, decoder-dependent invariants stay `n/a` instead
+ * of crashing the UI.
+ */
+export interface InvariantContext {
+  /**
+   * `harmony_decode_counts` from pir-sdk-wasm. If provided AND
+   * captured 0x43 frames have `rawBytes`, invariant 4 (HarmonyPIR
+   * Per-Group Request-Count Symmetry) does intra-frame uniformity
+   * checks instead of staying `n/a`.
+   */
+  harmonyDecodeCounts?: (frame: Uint8Array) => Uint32Array;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -86,7 +115,10 @@ function rxOf(frames: CapturedFrame[], op: number): CapturedFrame[] {
  * fresh struct; UI code does shallow-compare to decide whether to
  * re-render.
  */
-export function checkInvariants(frames: CapturedFrame[]): InvariantReport {
+export function checkInvariants(
+  frames: CapturedFrame[],
+  ctx: InvariantContext = {},
+): InvariantReport {
   const indexBatchTx = txOf(frames, 0x11);
   const chunkBatchTx = txOf(frames, 0x21);
   const merkleSibBatchTx = txOf(frames, 0x31);
@@ -124,19 +156,35 @@ export function checkInvariants(frames: CapturedFrame[]): InvariantReport {
       });
     }
 
-    // HarmonyPIR uses opcode 0x43 (HARMONY_BATCH_QUERY) for INDEX, CHUNK,
-    // AND Merkle sibling queries — the wire opcode doesn't distinguish
-    // axes. The per-slot T−1 invariant is checked separately in invariant
-    // 4. Here we surface that Harmony traffic was observed.
-    let harmonyNote = '';
-    if (harmonyQueryTx.length > 0) {
+    // HarmonyPIR also K-pads, but the wire opcode is 0x43 and num_groups
+    // lives in a different field (u16 LE at offset 8). frame-tap.ts
+    // parses it into `groupCount` for 0x43 frames the same way as DPF —
+    // we can do a direct check here: every TX 0x43 frame's groupCount
+    // should be K (INDEX axis) or K_CHUNK (CHUNK / Merkle axis).
+    let harmonyState: InvariantState = 'n/a';
+    const harmonyBatchTx = txOf(frames, 0x43);
+    if (harmonyBatchTx.length > 0) {
+      const counts = harmonyBatchTx.map((f) => f.groupCount ?? -1);
+      const indexAxis = counts.filter((c) => c === EXPECTED_K).length;
+      const chunkAxis = counts.filter((c) => c === EXPECTED_K_CHUNK).length;
+      const offAxis = counts.filter(
+        (c) => c !== EXPECTED_K && c !== EXPECTED_K_CHUNK,
+      );
+      harmonyState = offAxis.length === 0 ? 'pass' : 'fail';
       detail.push({
-        label: 'HarmonyPIR query frames (opcodes 0x42/0x43)',
-        value: `${harmonyQueryTx.length} observed; padding is per-slot T−1, not a wire count field (see invariant 4)`,
+        label: 'HarmonyPIR HARMONY_BATCH_QUERY (0x43) frames',
+        value: `${harmonyBatchTx.length} TX frames — ${indexAxis} INDEX-axis (K=${EXPECTED_K}), ${chunkAxis} CHUNK/Merkle-axis (K_CHUNK=${EXPECTED_K_CHUNK})`,
+        ok: offAxis.length === 0,
       });
-      harmonyNote =
-        ' • HarmonyPIR padding lives in the per-slot T−1 count (see invariant 4)';
+      if (offAxis.length > 0) {
+        detail.push({
+          label: 'Off-axis HarmonyPIR frames',
+          value: `${offAxis.length} frame(s) with num_groups ∈ {${[...new Set(offAxis)].join(',')}} — outside {K, K_CHUNK}`,
+          ok: false,
+        });
+      }
     }
+    const harmonyNote = ''; // No longer needed; harmony has its own row.
 
     // OnionPIR uses different opcodes (0x51/0x52). For Onion, the K-padding
     // happens inside the encrypted FHE query — we can only see request
@@ -155,14 +203,23 @@ export function checkInvariants(frames: CapturedFrame[]): InvariantReport {
       onionNote = ' • OnionPIR padding embedded in FHE payload (not directly observable)';
     }
 
-    const state: InvariantState = dpfState;
+    // Combine DPF + Harmony verdicts. If both backends saw traffic,
+    // both must pass. If only one was exercised, the other's `n/a`
+    // doesn't drag the result down.
+    let state: InvariantState;
+    if (dpfState === 'fail' || harmonyState === 'fail') state = 'fail';
+    else if (dpfState === 'pass' || harmonyState === 'pass') state = 'pass';
+    else state = 'n/a';
+
+    const dpfFrameTotal = indexBatchTx.length + chunkBatchTx.length;
+    const harmonyFrameTotal = harmonyBatchTx.length;
     const summary =
       state === 'pass'
-        ? `All ${indexBatchTx.length + chunkBatchTx.length} DPF batch frames padded to K=${EXPECTED_K} / K_CHUNK=${EXPECTED_K_CHUNK}${harmonyNote}${onionNote}`
+        ? `${dpfFrameTotal + harmonyFrameTotal} batch frames K-padded (${dpfFrameTotal} DPF + ${harmonyFrameTotal} Harmony 0x43)${onionNote}`
         : state === 'fail'
-          ? `One or more DPF batch frames deviated from the expected padding`
+          ? `One or more batch frames deviated from K=${EXPECTED_K} / K_CHUNK=${EXPECTED_K_CHUNK}`
           : hasFrames
-            ? `No DPF INDEX_BATCH / CHUNK_BATCH frames yet${harmonyNote}${onionNote}`
+            ? `No DPF INDEX_BATCH / CHUNK_BATCH or HarmonyPIR 0x43 frames yet${onionNote}`
             : 'No frames captured yet';
 
     results.push({
@@ -374,58 +431,93 @@ export function checkInvariants(frames: CapturedFrame[]): InvariantReport {
     let summary = 'No HarmonyPIR query frames observed';
 
     if (harmonyQueryTx.length > 0) {
-      // The CLAUDE.md invariant says: each per-group query slot sends
-      // exactly T−1 sorted distinct u32 indices, regardless of segment
-      // state, query count, or round. The HarmonyPIR wire format
-      // (see pir-sdk-client::harmony::encode_batch_query):
-      //
+      // Wire layout (see pir-sdk-client::harmony::encode_batch_query):
       //   [4B len][1B 0x43][1B level][2B round_id][2B num_groups]
       //   [1B sub_queries_per_group=1]
       //   per group: [1B group_id][4B count][count × 4B u32]
-      //   [optional 1B db_id]
       //
-      // The per-group `count` field directly encodes T−1 on the wire.
-      // For a single query, every group in the same frame carries the
-      // same `count` (= T−1). Across frames for the same axis, T is
-      // constant.
+      // Each 0x43 frame carries one segment class (INDEX / CHUNK / a
+      // specific Merkle level), and within the frame every group must
+      // share T (so all per-group `count` fields equal T−1).
+      // Different frames legitimately use different T values for
+      // differently-sized segments.
       //
-      // We can't easily decode the full body without re-implementing
-      // the codec, but we CAN observe:
-      //   (a) the frame-size distribution (informational), and
-      //   (b) that the frame body is consistent with the wire layout
-      //       — i.e. (size − 11) divides cleanly by some per-group
-      //       payload size that's of the form 5 + 4×(T−1).
-      //
-      // For now we surface the per-opcode size distribution and the
-      // frame count, and mark this as 'pass' iff there are no
-      // off-axis anomalies. Detecting a true T−1 leak requires
-      // decoding (T−1) from the payload, which we leave to a future
-      // bindgen-side helper.
-      const sizesByOp = new Map<number, number[]>();
-      for (const f of harmonyQueryTx) {
-        const op = f.opcode!;
-        const arr = sizesByOp.get(op) ?? [];
-        arr.push(f.size);
-        sizesByOp.set(op, arr);
-      }
+      // With `harmony_decode_counts` available we check intra-frame
+      // count uniformity directly on every TX 0x43 frame.
+      const decoder = ctx.harmonyDecodeCounts;
+      const batchFrames = harmonyQueryTx.filter(
+        (f) => f.opcode === 0x43 && f.rawBytes,
+      );
 
-      for (const [op, sizes] of sizesByOp) {
-        const distinct = [...new Set(sizes)].sort((a, b) => a - b);
+      if (!decoder) {
+        state = 'n/a';
+        summary = `${harmonyQueryTx.length} HarmonyPIR query frame(s) observed — waiting for WASM \`harmony_decode_counts\` to load`;
         detail.push({
-          label: `Opcode 0x${op.toString(16).padStart(2, '0')} frame sizes`,
-          value: `${distinct.length} distinct ∈ {${distinct.slice(0, 6).join(',')}${distinct.length > 6 ? '…' : ''}} across ${sizes.length} frame(s)`,
+          label: 'NOTE',
+          value:
+            'Wire-layer T−1 verification needs the pir-sdk-wasm `harmony_decode_counts` binding (added 2026-05-20). Status will flip to pass/fail once the WASM module finishes loading.',
         });
+      } else if (batchFrames.length === 0) {
+        state = 'n/a';
+        summary = `${harmonyQueryTx.length} HARMONY_QUERY (0x42) frame(s) observed; no 0x43 batch frames available for decode`;
+      } else {
+        const perFrame: {
+          seq: number;
+          counts: number[];
+          distinct: number[];
+          ok: boolean;
+        }[] = [];
+        let decodeErr: string | null = null;
+        for (const f of batchFrames) {
+          try {
+            const u = decoder(f.rawBytes!);
+            const counts = Array.from(u);
+            const distinct = [...new Set(counts)];
+            perFrame.push({ seq: f.seq, counts, distinct, ok: distinct.length === 1 });
+          } catch (e) {
+            decodeErr = `frame seq=${f.seq}: ${(e as Error).message}`;
+            break;
+          }
+        }
+
+        if (decodeErr) {
+          state = 'fail';
+          summary = `Decode error during T−1 check: ${decodeErr}`;
+          detail.push({ label: 'decode error', value: decodeErr, ok: false });
+        } else {
+          const failures = perFrame.filter((p) => !p.ok);
+          const distinctT = [...new Set(perFrame.map((p) => p.distinct[0]))]
+            .filter((v) => v !== undefined)
+            .sort((a, b) => a - b);
+          state = failures.length === 0 ? 'pass' : 'fail';
+          summary =
+            failures.length === 0
+              ? `${perFrame.length}/${perFrame.length} 0x43 frames internally uniform — T−1 ∈ {${distinctT.join(',')}} across ${distinctT.length} segment classes`
+              : `${failures.length}/${perFrame.length} 0x43 frames have intra-frame count drift — privacy violation`;
+          detail.push({
+            label: 'Frames checked',
+            value: `${perFrame.length} of ${batchFrames.length} 0x43 TX frames decoded via wasm-bindgen harmony_decode_counts`,
+          });
+          detail.push({
+            label: 'Per-frame intra-uniformity',
+            value: `${perFrame.length - failures.length}/${perFrame.length} frames internally uniform`,
+            ok: failures.length === 0,
+          });
+          detail.push({
+            label: 'Observed T−1 values (one per segment class)',
+            value: `{${distinctT.join(', ')}} — ${distinctT.length} distinct value(s)`,
+          });
+          if (failures.length > 0) {
+            for (const f of failures.slice(0, 3)) {
+              detail.push({
+                label: `Frame seq=${f.seq} count drift`,
+                value: `distinct counts = {${f.distinct.join(', ')}}`,
+                ok: false,
+              });
+            }
+          }
+        }
       }
-      // Mark as n/a — checking the per-slot T−1 invariant requires
-      // decoding `count` from each per-group entry, which we don't
-      // do today. The frame-size distribution above is informational.
-      state = 'n/a';
-      summary = `${harmonyQueryTx.length} HarmonyPIR query frames observed; per-slot T−1 verification requires payload decode (informational only).`;
-      detail.push({
-        label: 'NOTE',
-        value:
-          'Decoding `count` from each per-group entry would let us assert T−1 directly. The invariant is enforced inside the wasm-bindgen client (see PLAN_HARMONY_COUNT_LEAK_FIX.md); the wire trace is consistent with that but does not by itself prove it.',
-      });
     }
 
     results.push({
@@ -490,5 +582,18 @@ export function checkInvariants(frames: CapturedFrame[]): InvariantReport {
   const nonNa = results.filter((r) => r.state !== 'n/a');
   const allPass = nonNa.length > 0 && nonNa.every((r) => r.state === 'pass');
 
-  return { results, allPass, hasFrames };
+  let overall: InvariantOverall;
+  if (!hasFrames) {
+    overall = 'no-data';
+  } else if (nonNa.length === 0) {
+    overall = 'na';
+  } else if (nonNa.some((r) => r.state === 'fail')) {
+    overall = 'fail';
+  } else if (nonNa.some((r) => r.state === 'pending')) {
+    overall = 'pending';
+  } else {
+    overall = 'pass';
+  }
+
+  return { results, allPass, hasFrames, overall };
 }

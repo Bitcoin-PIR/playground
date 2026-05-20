@@ -14,6 +14,7 @@ import {
 } from '@/lib/explorer/frame-tap';
 import { checkInvariants } from '@/lib/explorer/invariants';
 import { runQuery } from '@/lib/explorer/runner';
+import { loadWasm } from '@/lib/wasm-loader';
 
 /**
  * Example P2PKH address (mainnet) corresponding to the first entry of
@@ -32,6 +33,9 @@ export function ExplorerClient() {
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
 
   const tapRef = useRef<FrameTap | null>(null);
+  const [harmonyDecodeCounts, setHarmonyDecodeCounts] = useState<
+    ((frame: Uint8Array) => Uint32Array) | null
+  >(null);
 
   // Live-update on every captured frame.
   useEffect(() => {
@@ -41,7 +45,30 @@ export function ExplorerClient() {
     };
   }, []);
 
-  const invariants = useMemo(() => checkInvariants(frames), [frames]);
+  // Load the WASM decoder once so invariant 4 (HarmonyPIR T−1) can fire
+  // on captured 0x43 frames instead of staying n/a.
+  useEffect(() => {
+    let cancelled = false;
+    loadWasm()
+      .then((mod) => {
+        if (cancelled) return;
+        const fn = mod.harmony_decode_counts;
+        if (typeof fn === 'function') {
+          setHarmonyDecodeCounts(() => fn.bind(mod));
+        }
+      })
+      .catch(() => {
+        /* invariant 4 stays n/a; the panel logs the reason itself */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const invariants = useMemo(
+    () => checkInvariants(frames, { harmonyDecodeCounts: harmonyDecodeCounts ?? undefined }),
+    [frames, harmonyDecodeCounts],
+  );
 
   async function onRun() {
     setRunning(true);

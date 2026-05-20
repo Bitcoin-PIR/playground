@@ -233,6 +233,14 @@ function classify(
     groupCount = raw[7];
     keysPerGroup = raw[8];
   }
+  // HARMONY_BATCH_QUERY (0x43) uses a different wire layout:
+  //   [4B len][1B 0x43][1B level][2B round_id][2B num_groups]
+  //   [1B sub_queries_per_group=1][per-group entries…]
+  // num_groups is u16 LE at byte offset 8; sub_queries_per_group is byte 10.
+  if (direction === 'tx' && op === 0x43 && raw.length >= 11) {
+    groupCount = raw[8] | (raw[9] << 8);
+    keysPerGroup = raw[10];
+  }
 
   return {
     opcode: op,
