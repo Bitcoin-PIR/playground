@@ -6,14 +6,15 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// GitHub Pages deploy at https://bitcoin-pir.github.io/playground/.
-// Set GITHUB_PAGES=1 to enable static export + basePath; unset for normal dev.
+// Deployment: GitHub Pages with a custom domain (sdk.bitcoinpir.org).
+// A custom-domain Pages site serves from the root path, so no basePath
+// or assetPrefix — runtime fetches like `/wasm/onionpir_client.mjs`
+// resolve directly. The `public/CNAME` file (copied verbatim into
+// `out/` by `next export`) tells Pages which domain to bind. If you
+// ever revert to the bitcoin-pir.github.io/playground subpath, set
+// basePath/assetPrefix back to `/playground` here and `delete public/
+// CNAME`.
 const isPages = process.env.GITHUB_PAGES === '1';
-const basePath = isPages ? '/playground' : '';
-// Exposed to the client so runtime fetches of /public assets (e.g.
-// the OnionPIR FHE module at /wasm/onionpir_client.mjs) can be
-// prefixed correctly. Without this they 404 on the deployed site.
-process.env.NEXT_PUBLIC_BASE_PATH = basePath;
 
 const withMDX = createMDX({
   extension: /\.mdx?$/,
@@ -36,11 +37,13 @@ const nextConfig = {
   pageExtensions: ['ts', 'tsx', 'md', 'mdx'],
   reactStrictMode: true,
   output: isPages ? 'export' : undefined,
-  basePath: basePath || undefined,
-  assetPrefix: basePath ? `${basePath}/` : undefined,
   trailingSlash: isPages,
   env: {
-    NEXT_PUBLIC_BASE_PATH: basePath,
+    // Always empty — custom domain serves at root, no path prefix.
+    // Code that prefixes asset URLs with this (e.g. the OnionPIR
+    // factory loader in lib/playground-clients.ts) still works since
+    // `'' + '/wasm/foo.mjs' === '/wasm/foo.mjs'`.
+    NEXT_PUBLIC_BASE_PATH: '',
   },
   images: { unoptimized: true },
   webpack: (config) => {
