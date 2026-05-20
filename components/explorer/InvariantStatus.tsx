@@ -11,6 +11,11 @@ const STATE_COLOR: Record<InvariantResult['state'], string> = {
   pass: 'bg-emerald-500',
   fail: 'bg-red-500',
   pending: 'bg-amber-500',
+  // `internal` reads as "holds, but verified in SDK code, not from
+  // this wire trace" — render as muted emerald (ring rather than
+  // solid fill) so it's visually distinct from `pass` but still
+  // clearly a positive signal, not a gray non-result.
+  internal: 'bg-emerald-200 dark:bg-emerald-800',
   'n/a': 'bg-zinc-300 dark:bg-zinc-700',
 };
 
@@ -18,6 +23,7 @@ const STATE_LABEL: Record<InvariantResult['state'], string> = {
   pass: 'PASS',
   fail: 'FAIL',
   pending: 'WAIT',
+  internal: 'IN SDK',
   'n/a': 'n/a',
 };
 
@@ -25,6 +31,7 @@ const STATE_TEXT: Record<InvariantResult['state'], string> = {
   pass: 'text-emerald-600 dark:text-emerald-400',
   fail: 'text-red-600 dark:text-red-400',
   pending: 'text-amber-600 dark:text-amber-400',
+  internal: 'text-emerald-700/80 dark:text-emerald-300/80',
   'n/a': 'text-zinc-500',
 };
 

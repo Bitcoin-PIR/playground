@@ -46,7 +46,22 @@ import {
 
 // ─── Invariant result ───────────────────────────────────────────────────────
 
-export type InvariantState = 'pass' | 'fail' | 'pending' | 'n/a';
+/**
+ * - `pass`     — verified directly from the captured wire trace
+ * - `fail`     — wire trace shows a violation
+ * - `pending`  — invariant applies and is expected, but data hasn't
+ *                arrived yet
+ * - `internal` — invariant DOES hold; enforced inside the SDK
+ *                client code (in `pir-sdk-client/src/{harmony,onion,
+ *                dpf}.rs` or the equivalent WASM-side code), but
+ *                this layer cannot observe it directly. Counted as a
+ *                pass for the aggregate verdict, but rendered with a
+ *                distinct label so users don't read it as "skipped".
+ * - `n/a`      — invariant doesn't apply to the currently captured
+ *                traffic (e.g. a HarmonyPIR-specific check on a
+ *                DPF-only trace).
+ */
+export type InvariantState = 'pass' | 'fail' | 'pending' | 'internal' | 'n/a';
 
 export interface InvariantResult {
   id: string;
@@ -270,16 +285,22 @@ export function checkInvariants(
       // HarmonyPIR uses opcode 0x43 (HARMONY_BATCH_QUERY) for INDEX,
       // CHUNK, and Merkle queries — the wire opcode doesn't distinguish
       // axes. CHUNK Round-Presence Symmetry is enforced internally by
-      // the wasm-bindgen Harmony client; it's not directly observable
-      // from the wire opcode alone. We surface that we observed
-      // multiple Harmony query frames (consistent with INDEX + CHUNK
-      // + Merkle phases all firing) but mark the invariant as n/a at
-      // the wire level.
-      state = 'n/a';
-      summary = `${harmonyQueryTx.length} HARMONY_BATCH_QUERY frame(s) observed — Harmony's CHUNK presence is below the wire layer (axis indistinguishable from opcode)`;
+      // the wasm-bindgen Harmony client (`pir-sdk-client/src/harmony.rs
+      // ::query_single`), which substitutes a synthetic dummy CHUNK
+      // round when the INDEX phase returned no hit. The wire-level
+      // observer can't distinguish that from a real CHUNK round, so
+      // we flag this as `internal` (verified in SDK, not from this
+      // trace) — DISTINCT from `n/a` because the invariant DOES hold,
+      // we just can't show its proof from the bytes alone.
+      state = 'internal';
+      summary = `${harmonyQueryTx.length} HARMONY_BATCH_QUERY frame(s) observed — enforced in pir-sdk-client/src/harmony.rs::query_single; not separately observable on the wire (0x43 carries INDEX + CHUNK + Merkle indistinguishably)`;
       detail.push({
         label: 'HARMONY_BATCH_QUERY frames',
         value: `${harmonyQueryTx.length}`,
+      });
+      detail.push({
+        label: 'Enforcement site',
+        value: 'pir-sdk-client/src/harmony.rs::query_single (synthetic dummy CHUNK round on not-found / whale)',
       });
     } else if (onionIndexQueryTx.length > 0) {
       // OnionPIR: every ONION_INDEX_QUERY followed by ≥1 ONION_CHUNK_QUERY.
@@ -319,6 +340,20 @@ export function checkInvariants(
     const detail: InvariantResult['detail'] = [];
     let state: InvariantState = 'n/a';
     let summary = 'No Merkle sibling traffic observed';
+    // If only HarmonyPIR traffic was captured: Merkle siblings ride on
+    // opcode 0x43 (same as INDEX + CHUNK queries) and are not separately
+    // observable. The "exactly 2 items per query" invariant is enforced
+    // inside the Harmony client (probes both cuckoo positions
+    // unconditionally — see CLAUDE.md "Merkle INDEX Item-Count
+    // Symmetry" in pir-sdk-client/src/harmony.rs).
+    if (harmonyQueryTx.length > 0 && merkleSibBatchTx.length === 0 && bucketMerkleSibBatchTx.length === 0) {
+      state = 'internal';
+      summary = `Harmony Merkle siblings ride opcode 0x43 indistinguishably from INDEX/CHUNK queries — enforced in pir-sdk-client/src/harmony.rs (both cuckoo positions always probed)`;
+      detail.push({
+        label: 'Enforcement site',
+        value: 'pir-sdk-client/src/harmony.rs::query_single — INDEX_CUCKOO_NUM_HASHES = 2 cuckoo positions probed for every query',
+      });
+    }
 
     // Wire layout reminder (see pir-sdk-client::merkle_verify::
     // encode_sibling_batch and CLAUDE.md "Merkle INDEX Item-Count
@@ -536,6 +571,17 @@ export function checkInvariants(
     let summary =
       'INDEX Merkle group-symmetry: applies to multi-query batches; insufficient context from a single trace';
 
+    // Same Harmony case as invariant 3 — Merkle on 0x43 not separately
+    // observable. PBC plan-rounds is applied in the SDK client.
+    if (harmonyQueryTx.length > 0 && merkleSibBatchTx.length === 0 && bucketMerkleSibBatchTx.length === 0) {
+      state = 'internal';
+      summary = `Harmony's INDEX Merkle PBC plan applied in pir-sdk-client/src/harmony.rs::query_index_phase_batched — not separately observable on 0x43`;
+      detail.push({
+        label: 'Enforcement site',
+        value: 'pir-sdk-client/src/harmony.rs::query_index_phase_batched (uses pbc_plan_rounds(derive_groups_3, K, 3, 500))',
+      });
+    }
+
     const merkleTx = [...merkleSibBatchTx, ...bucketMerkleSibBatchTx];
     if (merkleTx.length > 0) {
       // Count is per-Merkle-level frames. For DPF: 2 servers × n_levels
@@ -578,18 +624,22 @@ export function checkInvariants(
     });
   }
 
-  // Aggregate
-  const nonNa = results.filter((r) => r.state !== 'n/a');
-  const allPass = nonNa.length > 0 && nonNa.every((r) => r.state === 'pass');
+  // Aggregate. `internal` counts as pass-equivalent for the overall
+  // verdict (the invariant DOES hold; it's just enforced upstream of
+  // the wire layer we observe).
+  const applicable = results.filter((r) => r.state !== 'n/a');
+  const passOrInternal = (s: InvariantState) => s === 'pass' || s === 'internal';
+  const allPass =
+    applicable.length > 0 && applicable.every((r) => passOrInternal(r.state));
 
   let overall: InvariantOverall;
   if (!hasFrames) {
     overall = 'no-data';
-  } else if (nonNa.length === 0) {
+  } else if (applicable.length === 0) {
     overall = 'na';
-  } else if (nonNa.some((r) => r.state === 'fail')) {
+  } else if (applicable.some((r) => r.state === 'fail')) {
     overall = 'fail';
-  } else if (nonNa.some((r) => r.state === 'pending')) {
+  } else if (applicable.some((r) => r.state === 'pending')) {
     overall = 'pending';
   } else {
     overall = 'pass';
