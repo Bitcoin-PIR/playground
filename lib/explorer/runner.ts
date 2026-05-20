@@ -2,24 +2,20 @@
  * Query runner for the explorer page.
  *
  * Drives one query against the live PIR1/PIR2 servers using the vendored
- * WASM client (DPF or HarmonyPIR). The FrameTap is attached BEFORE the
- * WS connection opens so every frame is captured. The runner returns the
- * captured frame list plus a single-line outcome ("found N UTXOs",
- * "not found", or "error: <msg>").
- *
- * OnionPIR is intentionally not driven here: the OnionPIR WASM artifact
- * (`/wasm/onionpir_client.mjs` + `.wasm`) is not yet vendored into the
- * playground repo. The UI surfaces OnionPIR but tells the user it
- * requires the additional artifact. See the README / docs for the
- * sync-vendor follow-up.
+ * WASM client (DPF or HarmonyPIR) or the hand-rolled OnionPIR TS client.
+ * The FrameTap is attached BEFORE the WS connection opens so every frame
+ * is captured. The runner returns the captured frame list plus a
+ * single-line outcome ("found N UTXOs", "not found", or "error: <msg>").
  */
 
 'use client';
 
 import { loadWasm } from '@/lib/wasm-loader';
 import { PIR1_URL, PIR2_URL, HINT_URL, QUERY_URL } from '@/lib/endpoints';
+import { ensureOnionWasmFactory } from '@/lib/playground-clients';
 import { FrameTap, type CapturedFrame } from './frame-tap';
 import { hexToBytes, scriptHash, addressToScriptPubKey } from '@vendor/web/hash';
+import { OnionPirWebClient } from '@vendor/web/onionpir_client';
 
 // ─── Backend tag ─────────────────────────────────────────────────────────────
 
@@ -155,53 +151,32 @@ async function runHarmony(tap: FrameTap, sh: Uint8Array): Promise<QueryRun> {
 // ─── OnionPIR runner (stub — see header) ─────────────────────────────────────
 
 async function runOnion(tap: FrameTap, sh: Uint8Array): Promise<QueryRun> {
-  // OnionPIR is partially supported: the vendored TS client
-  // (vendor/bitcoinpir-web/onionpir_client.ts) lazy-loads
-  // `/wasm/onionpir_client.mjs` from the public asset tree. That file is
-  // NOT vendored into the playground today — the sync-vendor.sh script
-  // only copies the SDK WASM. The DPF and HarmonyPIR frames demonstrate
-  // the same K=75 / K_CHUNK=80 / kpg=2 invariants on the wire.
-  //
-  // We still run a thin handshake against the OnionPIR server: open a
-  // WebSocket, send REQ_GET_INFO_JSON, then close. That gives a few
-  // captured frames so the user can see the protocol-level traffic
-  // (PING/PONG, INFO_JSON) even without the OnionPIR WASM artifact.
-  void sh;
-  await new Promise<void>((resolve, reject) => {
-    const ws = new WebSocket(PIR2_URL);
-    ws.binaryType = 'arraybuffer';
-    const timeout = setTimeout(() => {
-      ws.close();
-      reject(new Error('Timed out connecting to OnionPIR server'));
-    }, 10_000);
-    ws.onopen = () => {
-      // Send REQ_GET_INFO_JSON (0x03) — length-prefixed.
-      const msg = new Uint8Array(5);
-      msg[0] = 1;
-      msg[1] = 0;
-      msg[2] = 0;
-      msg[3] = 0;
-      msg[4] = 0x03;
-      ws.send(msg);
-      // Wait a short moment for the response, then close.
-      setTimeout(() => {
-        clearTimeout(timeout);
-        ws.close();
-        resolve();
-      }, 1500);
+  // OnionPIR uses the hand-rolled TS client (SEAL doesn't compile to
+  // wasm32). The .mjs + .wasm artifacts live under public/wasm/; we
+  // install the factory via the documented `__onionpirWasmFactory`
+  // hook (see lib/playground-clients.ts::ensureOnionWasmFactory) so
+  // the URL is basePath-aware and webpack-ignored. OnionPIR only talks
+  // to pir1 (Hetzner) per the post-2026-05 fleet split.
+  await ensureOnionWasmFactory();
+  const client = new OnionPirWebClient({ serverUrl: PIR1_URL });
+  try {
+    await client.connect();
+    const results = await client.queryBatch([sh], undefined, 0);
+    const found = Array.isArray(results) && results.length > 0 && !!results[0];
+    return {
+      frames: tap.snapshot(),
+      outcome: found
+        ? `OnionPIR query completed — entry found`
+        : `OnionPIR query completed — entry not found`,
+      found,
     };
-    ws.onerror = () => {
-      clearTimeout(timeout);
-      ws.close();
-      reject(new Error('OnionPIR WebSocket error'));
-    };
-  });
-  return {
-    frames: tap.snapshot(),
-    outcome:
-      'OnionPIR INFO frame captured. Full FHE query path requires the OnionPIR WASM artifact (not vendored yet — see vendor/README.md).',
-    found: false,
-  };
+  } finally {
+    try {
+      client.disconnect();
+    } catch {
+      /* ignore close errors */
+    }
+  }
 }
 
 // ─── Public entry point ──────────────────────────────────────────────────────

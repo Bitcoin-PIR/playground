@@ -66,8 +66,13 @@ export function ExplorerClient() {
   }, []);
 
   const invariants = useMemo(
-    () => checkInvariants(frames, { harmonyDecodeCounts: harmonyDecodeCounts ?? undefined }),
-    [frames, harmonyDecodeCounts],
+    () =>
+      checkInvariants(
+        frames,
+        { harmonyDecodeCounts: harmonyDecodeCounts ?? undefined },
+        backend,
+      ),
+    [frames, harmonyDecodeCounts, backend],
   );
 
   async function onRun() {
@@ -143,17 +148,6 @@ export function ExplorerClient() {
         {outcome && (
           <div className="mt-2 rounded bg-zinc-50 px-3 py-1.5 text-xs dark:bg-zinc-900">
             {outcome}
-          </div>
-        )}
-        {backend === 'onionpir' && (
-          <div className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200">
-            <strong>Note:</strong> the OnionPIR FHE module
-            (<code className="font-mono">onionpir_client.mjs</code> +{' '}
-            <code className="font-mono">.wasm</code>) is not vendored in this
-            playground. Running a query against OnionPIR will fetch a single
-            INFO frame from <code className="font-mono">weikeng2</code> so you
-            can observe the handshake but will not drive a full FHE query.
-            Use DPF or HarmonyPIR for the full invariant demo.
           </div>
         )}
       </section>

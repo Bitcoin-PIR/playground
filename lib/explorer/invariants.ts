@@ -47,21 +47,58 @@ import {
 // ─── Invariant result ───────────────────────────────────────────────────────
 
 /**
- * - `pass`     — verified directly from the captured wire trace
- * - `fail`     — wire trace shows a violation
- * - `pending`  — invariant applies and is expected, but data hasn't
- *                arrived yet
- * - `internal` — invariant DOES hold; enforced inside the SDK
- *                client code (in `pir-sdk-client/src/{harmony,onion,
- *                dpf}.rs` or the equivalent WASM-side code), but
- *                this layer cannot observe it directly. Counted as a
- *                pass for the aggregate verdict, but rendered with a
- *                distinct label so users don't read it as "skipped".
- * - `n/a`      — invariant doesn't apply to the currently captured
- *                traffic (e.g. a HarmonyPIR-specific check on a
- *                DPF-only trace).
+ * - `pass`    — the invariant holds. Either verified from the wire
+ *               trace (e.g. K=75 on 0x11 frames) or enforced upstream
+ *               in the SDK client code (e.g. HarmonyPIR's CHUNK
+ *               round-presence — the wire opcode can't distinguish
+ *               INDEX from CHUNK, but `pir-sdk-client/src/harmony.rs`
+ *               always emits one). Where the property is verified
+ *               lives in `summary`; here we collapse both cases to
+ *               PASS so wallet developers see a single positive
+ *               signal per property.
+ * - `fail`    — wire trace shows a violation.
+ * - `pending` — invariant applies and is expected, but data hasn't
+ *               arrived yet.
+ * - `n/a`     — invariant doesn't apply at all to this trace
+ *               (e.g. HarmonyPIR T-1 on a DPF-only trace). The
+ *               applicable-invariants filter normally hides these.
  */
-export type InvariantState = 'pass' | 'fail' | 'pending' | 'internal' | 'n/a';
+export type InvariantState = 'pass' | 'fail' | 'pending' | 'n/a';
+
+/**
+ * The PIR backend the user has selected. Used to filter the report
+ * down to invariants that actually apply to the captured traffic.
+ */
+export type InvariantBackend = 'dpf' | 'harmonypir' | 'onionpir';
+
+/**
+ * Which invariants apply to each backend. Out-of-scope invariants are
+ * filtered from the report instead of cluttering the panel with `n/a`
+ * rows the wallet developer can't act on.
+ *
+ * Source of truth for these assignments is CLAUDE.md; the comments on
+ * each invariant block below cite the specific enforcement site.
+ */
+const APPLICABLE: Record<InvariantBackend, string[]> = {
+  dpf: [
+    'query-padding',
+    'chunk-round-presence',
+    'merkle-index-item-count',
+    'index-merkle-group-symmetry',
+  ],
+  harmonypir: [
+    'query-padding',
+    'chunk-round-presence',
+    'merkle-index-item-count',
+    'harmony-tminus1',
+    'index-merkle-group-symmetry',
+  ],
+  onionpir: [
+    'query-padding',
+    'chunk-round-presence',
+    'merkle-index-item-count',
+  ],
+};
 
 export interface InvariantResult {
   id: string;
@@ -133,6 +170,7 @@ function rxOf(frames: CapturedFrame[], op: number): CapturedFrame[] {
 export function checkInvariants(
   frames: CapturedFrame[],
   ctx: InvariantContext = {},
+  backend?: InvariantBackend,
 ): InvariantReport {
   const indexBatchTx = txOf(frames, 0x11);
   const chunkBatchTx = txOf(frames, 0x21);
@@ -282,25 +320,22 @@ export function checkInvariants(
         ok: missing === 0,
       });
     } else if (harmonyQueryTx.length > 0) {
-      // HarmonyPIR uses opcode 0x43 (HARMONY_BATCH_QUERY) for INDEX,
-      // CHUNK, and Merkle queries — the wire opcode doesn't distinguish
-      // axes. CHUNK Round-Presence Symmetry is enforced internally by
-      // the wasm-bindgen Harmony client (`pir-sdk-client/src/harmony.rs
-      // ::query_single`), which substitutes a synthetic dummy CHUNK
-      // round when the INDEX phase returned no hit. The wire-level
-      // observer can't distinguish that from a real CHUNK round, so
-      // we flag this as `internal` (verified in SDK, not from this
-      // trace) — DISTINCT from `n/a` because the invariant DOES hold,
-      // we just can't show its proof from the bytes alone.
-      state = 'internal';
-      summary = `${harmonyQueryTx.length} HARMONY_BATCH_QUERY frame(s) observed — enforced in pir-sdk-client/src/harmony.rs::query_single; not separately observable on the wire (0x43 carries INDEX + CHUNK + Merkle indistinguishably)`;
+      // HarmonyPIR's opcode 0x43 carries INDEX, CHUNK, and Merkle queries
+      // indistinguishably on the wire. The CHUNK round-presence invariant
+      // is enforced in `pir-sdk-client/src/harmony.rs::query_single`, which
+      // emits a synthetic dummy CHUNK round when the INDEX phase returned
+      // no hit. We can't see the round labels on the wire, but the SDK
+      // guarantees the property; we mark `pass` and put the enforcement
+      // site in the summary + detail so reviewers can audit it.
+      state = 'pass';
+      summary = `${harmonyQueryTx.length} HARMONY_BATCH_QUERY frame(s) observed — property holds via pir-sdk-client/src/harmony.rs::query_single (synthetic dummy CHUNK round on not-found/whale); not distinguishable from INDEX or Merkle frames at the wire layer`;
       detail.push({
         label: 'HARMONY_BATCH_QUERY frames',
         value: `${harmonyQueryTx.length}`,
       });
       detail.push({
-        label: 'Enforcement site',
-        value: 'pir-sdk-client/src/harmony.rs::query_single (synthetic dummy CHUNK round on not-found / whale)',
+        label: 'Verified at',
+        value: 'SDK code (pir-sdk-client/src/harmony.rs::query_single)',
       });
     } else if (onionIndexQueryTx.length > 0) {
       // OnionPIR: every ONION_INDEX_QUERY followed by ≥1 ONION_CHUNK_QUERY.
@@ -340,18 +375,22 @@ export function checkInvariants(
     const detail: InvariantResult['detail'] = [];
     let state: InvariantState = 'n/a';
     let summary = 'No Merkle sibling traffic observed';
-    // If only HarmonyPIR traffic was captured: Merkle siblings ride on
-    // opcode 0x43 (same as INDEX + CHUNK queries) and are not separately
-    // observable. The "exactly 2 items per query" invariant is enforced
-    // inside the Harmony client (probes both cuckoo positions
+    // HarmonyPIR: Merkle siblings ride opcode 0x43 (same as INDEX/CHUNK
+    // queries) so they're not separately observable. The "exactly 2
+    // items per query" property is enforced in
+    // pir-sdk-client/src/harmony.rs (probes both cuckoo positions
     // unconditionally — see CLAUDE.md "Merkle INDEX Item-Count
-    // Symmetry" in pir-sdk-client/src/harmony.rs).
-    if (harmonyQueryTx.length > 0 && merkleSibBatchTx.length === 0 && bucketMerkleSibBatchTx.length === 0) {
-      state = 'internal';
-      summary = `Harmony Merkle siblings ride opcode 0x43 indistinguishably from INDEX/CHUNK queries — enforced in pir-sdk-client/src/harmony.rs (both cuckoo positions always probed)`;
+    // Symmetry").
+    if (
+      harmonyQueryTx.length > 0 &&
+      merkleSibBatchTx.length === 0 &&
+      bucketMerkleSibBatchTx.length === 0
+    ) {
+      state = 'pass';
+      summary = `Merkle siblings ride opcode 0x43 with INDEX/CHUNK queries — property holds via pir-sdk-client/src/harmony.rs (both cuckoo positions always probed)`;
       detail.push({
-        label: 'Enforcement site',
-        value: 'pir-sdk-client/src/harmony.rs::query_single — INDEX_CUCKOO_NUM_HASHES = 2 cuckoo positions probed for every query',
+        label: 'Verified at',
+        value: 'SDK code (pir-sdk-client/src/harmony.rs::query_single — INDEX_CUCKOO_NUM_HASHES = 2)',
       });
     }
 
@@ -571,14 +610,18 @@ export function checkInvariants(
     let summary =
       'INDEX Merkle group-symmetry: applies to multi-query batches; insufficient context from a single trace';
 
-    // Same Harmony case as invariant 3 — Merkle on 0x43 not separately
-    // observable. PBC plan-rounds is applied in the SDK client.
-    if (harmonyQueryTx.length > 0 && merkleSibBatchTx.length === 0 && bucketMerkleSibBatchTx.length === 0) {
-      state = 'internal';
-      summary = `Harmony's INDEX Merkle PBC plan applied in pir-sdk-client/src/harmony.rs::query_index_phase_batched — not separately observable on 0x43`;
+    // Same Harmony case as invariant 3 — Merkle items ride 0x43.
+    // PBC plan-rounds (derive_groups_3) is applied inside the SDK.
+    if (
+      harmonyQueryTx.length > 0 &&
+      merkleSibBatchTx.length === 0 &&
+      bucketMerkleSibBatchTx.length === 0
+    ) {
+      state = 'pass';
+      summary = `INDEX Merkle PBC plan applied via pir-sdk-client/src/harmony.rs::query_index_phase_batched — not separately observable on 0x43`;
       detail.push({
-        label: 'Enforcement site',
-        value: 'pir-sdk-client/src/harmony.rs::query_index_phase_batched (uses pbc_plan_rounds(derive_groups_3, K, 3, 500))',
+        label: 'Verified at',
+        value: 'SDK code (pbc_plan_rounds(derive_groups_3, K, 3, 500))',
       });
     }
 
@@ -624,13 +667,18 @@ export function checkInvariants(
     });
   }
 
-  // Aggregate. `internal` counts as pass-equivalent for the overall
-  // verdict (the invariant DOES hold; it's just enforced upstream of
-  // the wire layer we observe).
-  const applicable = results.filter((r) => r.state !== 'n/a');
-  const passOrInternal = (s: InvariantState) => s === 'pass' || s === 'internal';
+  // Filter to invariants applicable to the selected backend. If no
+  // backend is supplied (e.g. caller hasn't picked one yet), keep all
+  // results so the panel shows everything that might apply.
+  const filteredResults = backend
+    ? results.filter((r) => APPLICABLE[backend].includes(r.id))
+    : results;
+
+  // Aggregate verdict over the FILTERED set. `n/a` is excluded
+  // (shouldn't occur after filtering, but defensive).
+  const applicable = filteredResults.filter((r) => r.state !== 'n/a');
   const allPass =
-    applicable.length > 0 && applicable.every((r) => passOrInternal(r.state));
+    applicable.length > 0 && applicable.every((r) => r.state === 'pass');
 
   let overall: InvariantOverall;
   if (!hasFrames) {
@@ -645,5 +693,5 @@ export function checkInvariants(
     overall = 'pass';
   }
 
-  return { results, allPass, hasFrames, overall };
+  return { results: filteredResults, allPass, hasFrames, overall };
 }

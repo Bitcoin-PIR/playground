@@ -385,16 +385,18 @@ export async function runHarmonyQuery(
  * webpack-managed import by installing the factory ourselves loads the same
  * `.mjs` from /public via the native browser loader.
  */
-async function ensureOnionWasmFactory(): Promise<void> {
+export async function ensureOnionWasmFactory(): Promise<void> {
   type OnionFactory = (m?: object) => Promise<unknown>;
   type Holder = { __onionpirWasmFactory?: OnionFactory };
   const g = globalThis as unknown as Holder;
   if (g.__onionpirWasmFactory) return;
   // `webpackIgnore: true` tells webpack to leave the import alone; the
-  // browser's native ESM loader fetches from /wasm/onionpir_client.mjs
-  // (served out of public/ at request time).  The path is computed at
-  // runtime so `tsc --noEmit` doesn't try to resolve it.
-  const url = '/wasm/onionpir_client.mjs';
+  // browser's native ESM loader fetches the .mjs from /public/wasm/.
+  // On GitHub Pages the site is served under `/playground/`, so the
+  // bare `/wasm/onionpir_client.mjs` 404s — prepend the build-time
+  // basePath (empty in dev, `/playground` on Pages).
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+  const url = `${basePath}/wasm/onionpir_client.mjs`;
   const mod = (await import(/* webpackIgnore: true */ /* @vite-ignore */ url)) as {
     default: OnionFactory;
   };
