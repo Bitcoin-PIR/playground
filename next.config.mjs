@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// GitHub Pages deploy at https://bitcoin-pir.github.io/playground/.
+// Set GITHUB_PAGES=1 to enable static export + basePath; unset for normal dev.
+const isPages = process.env.GITHUB_PAGES === '1';
+
 const withMDX = createMDX({
   extension: /\.mdx?$/,
   options: {
@@ -26,6 +30,11 @@ const withMDX = createMDX({
 const nextConfig = {
   pageExtensions: ['ts', 'tsx', 'md', 'mdx'],
   reactStrictMode: true,
+  output: isPages ? 'export' : undefined,
+  basePath: isPages ? '/playground' : undefined,
+  assetPrefix: isPages ? '/playground/' : undefined,
+  trailingSlash: isPages,
+  images: { unoptimized: true },
   webpack: (config) => {
     config.experiments = { ...config.experiments, asyncWebAssembly: true };
     // Vendored TS sources from BitcoinPIR/web use `import './foo.js'`
