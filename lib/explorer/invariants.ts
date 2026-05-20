@@ -113,15 +113,29 @@ export function checkInvariants(frames: CapturedFrame[]): InvariantReport {
       const chunkAllK = chunkCounts.length === 0 || chunkCounts.every((c) => c === EXPECTED_K_CHUNK);
       dpfState = indexAllK && chunkAllK ? 'pass' : 'fail';
       detail.push({
-        label: 'DPF / HarmonyPIR INDEX frames',
+        label: 'DPF INDEX_BATCH (0x11) frames',
         value: `${indexBatchTx.length} frames, counts=${[...new Set(indexCounts)].join(',')} (expected ${EXPECTED_K})`,
         ok: indexAllK,
       });
       detail.push({
-        label: 'DPF / HarmonyPIR CHUNK frames',
+        label: 'DPF CHUNK_BATCH (0x21) frames',
         value: `${chunkBatchTx.length} frames, counts=${[...new Set(chunkCounts)].join(',')} (expected ${EXPECTED_K_CHUNK})`,
         ok: chunkAllK,
       });
+    }
+
+    // HarmonyPIR uses opcode 0x43 (HARMONY_BATCH_QUERY) for INDEX, CHUNK,
+    // AND Merkle sibling queries — the wire opcode doesn't distinguish
+    // axes. The per-slot T−1 invariant is checked separately in invariant
+    // 4. Here we surface that Harmony traffic was observed.
+    let harmonyNote = '';
+    if (harmonyQueryTx.length > 0) {
+      detail.push({
+        label: 'HarmonyPIR query frames (opcodes 0x42/0x43)',
+        value: `${harmonyQueryTx.length} observed; padding is per-slot T−1, not a wire count field (see invariant 4)`,
+      });
+      harmonyNote =
+        ' • HarmonyPIR padding lives in the per-slot T−1 count (see invariant 4)';
     }
 
     // OnionPIR uses different opcodes (0x51/0x52). For Onion, the K-padding
@@ -144,11 +158,11 @@ export function checkInvariants(frames: CapturedFrame[]): InvariantReport {
     const state: InvariantState = dpfState;
     const summary =
       state === 'pass'
-        ? `All ${indexBatchTx.length + chunkBatchTx.length} batch frames padded to K=${EXPECTED_K} / K_CHUNK=${EXPECTED_K_CHUNK}${onionNote}`
+        ? `All ${indexBatchTx.length + chunkBatchTx.length} DPF batch frames padded to K=${EXPECTED_K} / K_CHUNK=${EXPECTED_K_CHUNK}${harmonyNote}${onionNote}`
         : state === 'fail'
-          ? `One or more batch frames deviated from the expected padding`
+          ? `One or more DPF batch frames deviated from the expected padding`
           : hasFrames
-            ? `No DPF/Harmony INDEX/CHUNK frames observed yet${onionNote}`
+            ? `No DPF INDEX_BATCH / CHUNK_BATCH frames yet${harmonyNote}${onionNote}`
             : 'No frames captured yet';
 
     results.push({
@@ -194,6 +208,21 @@ export function checkInvariants(frames: CapturedFrame[]): InvariantReport {
         label: 'INDEX→CHUNK pairings',
         value: `${indexBatchTx.length - missing} of ${indexBatchTx.length}`,
         ok: missing === 0,
+      });
+    } else if (harmonyQueryTx.length > 0) {
+      // HarmonyPIR uses opcode 0x43 (HARMONY_BATCH_QUERY) for INDEX,
+      // CHUNK, and Merkle queries — the wire opcode doesn't distinguish
+      // axes. CHUNK Round-Presence Symmetry is enforced internally by
+      // the wasm-bindgen Harmony client; it's not directly observable
+      // from the wire opcode alone. We surface that we observed
+      // multiple Harmony query frames (consistent with INDEX + CHUNK
+      // + Merkle phases all firing) but mark the invariant as n/a at
+      // the wire level.
+      state = 'n/a';
+      summary = `${harmonyQueryTx.length} HARMONY_BATCH_QUERY frame(s) observed — Harmony's CHUNK presence is below the wire layer (axis indistinguishable from opcode)`;
+      detail.push({
+        label: 'HARMONY_BATCH_QUERY frames',
+        value: `${harmonyQueryTx.length}`,
       });
     } else if (onionIndexQueryTx.length > 0) {
       // OnionPIR: every ONION_INDEX_QUERY followed by ≥1 ONION_CHUNK_QUERY.
@@ -345,11 +374,33 @@ export function checkInvariants(frames: CapturedFrame[]): InvariantReport {
     let summary = 'No HarmonyPIR query frames observed';
 
     if (harmonyQueryTx.length > 0) {
-      // The HarmonyPIR request body is K (or K_CHUNK) groups, each a
-      // sorted u32 array of length T-1. The total request size must be
-      // identical across every same-phase query if T is fixed.
-      // We can detect drift by checking that all same-opcode frames are
-      // the same byte size.
+      // The CLAUDE.md invariant says: each per-group query slot sends
+      // exactly T−1 sorted distinct u32 indices, regardless of segment
+      // state, query count, or round. The HarmonyPIR wire format
+      // (see pir-sdk-client::harmony::encode_batch_query):
+      //
+      //   [4B len][1B 0x43][1B level][2B round_id][2B num_groups]
+      //   [1B sub_queries_per_group=1]
+      //   per group: [1B group_id][4B count][count × 4B u32]
+      //   [optional 1B db_id]
+      //
+      // The per-group `count` field directly encodes T−1 on the wire.
+      // For a single query, every group in the same frame carries the
+      // same `count` (= T−1). Across frames for the same axis, T is
+      // constant.
+      //
+      // We can't easily decode the full body without re-implementing
+      // the codec, but we CAN observe:
+      //   (a) the frame-size distribution (informational), and
+      //   (b) that the frame body is consistent with the wire layout
+      //       — i.e. (size − 11) divides cleanly by some per-group
+      //       payload size that's of the form 5 + 4×(T−1).
+      //
+      // For now we surface the per-opcode size distribution and the
+      // frame count, and mark this as 'pass' iff there are no
+      // off-axis anomalies. Detecting a true T−1 leak requires
+      // decoding (T−1) from the payload, which we leave to a future
+      // bindgen-side helper.
       const sizesByOp = new Map<number, number[]>();
       for (const f of harmonyQueryTx) {
         const op = f.opcode!;
@@ -358,21 +409,23 @@ export function checkInvariants(frames: CapturedFrame[]): InvariantReport {
         sizesByOp.set(op, arr);
       }
 
-      let drifted = 0;
       for (const [op, sizes] of sizesByOp) {
-        const distinct = [...new Set(sizes)];
-        if (distinct.length > 1) drifted++;
+        const distinct = [...new Set(sizes)].sort((a, b) => a - b);
         detail.push({
           label: `Opcode 0x${op.toString(16).padStart(2, '0')} frame sizes`,
-          value: `${distinct.join(',')} bytes (${sizes.length} frame(s))`,
-          ok: distinct.length === 1,
+          value: `${distinct.length} distinct ∈ {${distinct.slice(0, 6).join(',')}${distinct.length > 6 ? '…' : ''}} across ${sizes.length} frame(s)`,
         });
       }
-      state = drifted === 0 ? 'pass' : 'fail';
-      summary =
-        drifted === 0
-          ? `All ${harmonyQueryTx.length} HarmonyPIR query frames have a uniform on-wire size (T fixed)`
-          : `${drifted} HarmonyPIR opcode(s) showed size drift — per-group count is leaking`;
+      // Mark as n/a — checking the per-slot T−1 invariant requires
+      // decoding `count` from each per-group entry, which we don't
+      // do today. The frame-size distribution above is informational.
+      state = 'n/a';
+      summary = `${harmonyQueryTx.length} HarmonyPIR query frames observed; per-slot T−1 verification requires payload decode (informational only).`;
+      detail.push({
+        label: 'NOTE',
+        value:
+          'Decoding `count` from each per-group entry would let us assert T−1 directly. The invariant is enforced inside the wasm-bindgen client (see PLAN_HARMONY_COUNT_LEAK_FIX.md); the wire trace is consistent with that but does not by itself prove it.',
+      });
     }
 
     results.push({
