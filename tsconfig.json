@@ -18,7 +18,8 @@
       "@/*": ["./*"],
       "@vendor/web/*": ["./vendor/bitcoinpir-web/*"],
       "@vendor/wasm": ["./vendor/pir-sdk-wasm/pir_sdk_wasm.js"],
-      "@vendor/wasm/*": ["./vendor/pir-sdk-wasm/*"]
+      "@vendor/wasm/*": ["./vendor/pir-sdk-wasm/*"],
+      "pir-sdk-wasm": ["./vendor/pir-sdk-wasm/pir_sdk_wasm.js"]
     }
   },
   "include": [

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { ExplorerClient } from './ExplorerClient';
 
 export const metadata: Metadata = {
   title: 'Wire explorer',
@@ -8,17 +9,17 @@ export const metadata: Metadata = {
 
 export default function ExplorerPage() {
   return (
-    <div className="container-wide py-12">
+    <div className="container-wide py-10">
       <h1 className="text-3xl font-bold tracking-tight">Protocol & wire explorer</h1>
-      <p className="mt-3 text-zinc-600 dark:text-zinc-400">
-        Run a query and see every frame the SDK sends and receives. Verify in real time that
-        K-padding, CHUNK round-presence, INDEX Merkle item counts, and HarmonyPIR per-group
-        request counts all match the privacy invariants documented in CLAUDE.md.
+      <p className="mt-3 max-w-3xl text-zinc-600 dark:text-zinc-400">
+        Run a query and see every WebSocket frame the SDK sends and receives. The
+        explorer monkey-patches <code className="font-mono text-xs">window.WebSocket</code>{' '}
+        so it observes every frame the vendored DPF/HarmonyPIR WASM clients produce, then
+        checks the captured traffic against the four privacy invariants documented in the
+        main repo&apos;s CLAUDE.md.
       </p>
 
-      <div className="mt-12 rounded-lg border border-dashed border-zinc-300 p-12 text-center text-zinc-500 dark:border-zinc-700">
-        <p className="font-mono text-sm">[explorer UI lands here — feat/explorer]</p>
-      </div>
+      <ExplorerClient />
     </div>
   );
 }

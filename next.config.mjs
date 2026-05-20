@@ -28,18 +28,19 @@ const nextConfig = {
   reactStrictMode: true,
   webpack: (config) => {
     config.experiments = { ...config.experiments, asyncWebAssembly: true };
-    // added for /playground — vendored TS sources from BitcoinPIR/web use
-    // `import './foo.js'` (TypeScript-style ESM with explicit extensions);
-    // tell webpack to resolve `.js` to the matching `.ts` when present.
+    // Vendored TS sources from BitcoinPIR/web use `import './foo.js'`
+    // (TypeScript-style ESM with explicit extensions); tell webpack to
+    // resolve `.js` to the matching `.ts` when present.
     config.resolve = config.resolve ?? {};
     config.resolve.extensionAlias = {
       ...(config.resolve.extensionAlias ?? {}),
       '.js': ['.ts', '.tsx', '.js'],
+      '.mjs': ['.mts', '.mjs'],
     };
-    // added for /playground — the vendored `sdk-bridge.ts` carries a dynamic
-    // `import('pir-sdk-wasm')` (intended to consume the npm package).  Alias
-    // that bare specifier onto the local wasm-pack output so webpack resolves
-    // it without us having to publish the package.
+    // The vendored `sdk-bridge.ts` carries a dynamic `import('pir-sdk-wasm')`
+    // (intended to consume the npm package).  Alias that bare specifier onto
+    // the local wasm-pack output so webpack resolves it without us having
+    // to publish the package.
     config.resolve.alias = {
       ...(config.resolve.alias ?? {}),
       'pir-sdk-wasm': path.resolve(
