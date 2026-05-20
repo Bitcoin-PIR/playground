@@ -1,0 +1,109 @@
+// TypeScript declarations for the OnionPIRv2 WASM client.
+//
+// The build emits `onionpir_client.mjs` (ES module) + `onionpir_client.wasm`.
+// Import the factory and instantiate the module:
+//
+//   import createOnionPir from "./onionpir_client.mjs";
+//   const m = await createOnionPir();
+//   const info = m.paramsInfo(numEntries);
+//   const client = new m.OnionPirClient(numEntries);
+
+export interface OnionPirParamsInfo {
+    numEntries:     number;
+    entrySize:      number;
+    numPlaintexts:  number;
+    fstDimSz:       number;
+    otherDimSz:     number;
+    polyDegree:     number;
+    rnsModCount:    number;
+    coeffValCnt:    number;
+    dbSizeMB:       number;
+    physicalSizeMB: number;
+}
+
+export interface OnionPirClient {
+    /** Auto-assigned client id. Use with server.setGaloisKeys / setGswKey. */
+    id(): number;
+
+    /** Serialized BV galois keys. Send to server.setGaloisKeys. */
+    galoisKeys(): Uint8Array;
+
+    /** Serialized GSW(s) key. Send to server.setGswKey. */
+    gswKey(): Uint8Array;
+
+    /** Serialized PIR query for plaintext index ptIdx. */
+    generateQuery(ptIdx: number): Uint8Array;
+
+    /**
+     * Decrypt a server response. Input is the bit-packed bytes returned by
+     * server.answerQuery. Output is `[u32 N (LE)][u64 coeff_0]…` matching
+     * the format from server.getOriginalPlaintext for direct equality checks.
+     */
+    decryptResponse(response: Uint8Array): Uint8Array;
+
+    /**
+     * Export this client's secret key. Treat as sensitive — these bytes
+     * fully recover the client's identity. Pair with `createClientFromSecretKey`
+     * to persist a client across page loads.
+     */
+    exportSecretKey(): Uint8Array;
+
+    /** Free the underlying C++ object. Call when done. */
+    delete(): void;
+}
+
+export interface OnionPirClientConstructor {
+    /**
+     * `numEntries`: un-padded entry count of the OnionPIR database this
+     * client will query. INDEX, CHUNK and each Merkle-sibling level are
+     * separate databases of different sizes — the FHE query hypercube is
+     * derived from `numEntries`, so each client must match its database.
+     * Pass `0` to use the compiled-in DBConsts default.
+     */
+    new(numEntries: number): OnionPirClient;
+}
+
+export interface OnionPirModule {
+    /** PIR shape for a database of `numEntries` entries (`0` → default). */
+    paramsInfo(numEntries: number): OnionPirParamsInfo;
+
+    /** PIR client class. */
+    OnionPirClient: OnionPirClientConstructor;
+
+    /**
+     * Reconstruct a client from a previously-exported secret key and the id
+     * the server already knows. `numEntries` sizes the client to the
+     * OnionPIR database it will query (see `OnionPirClientConstructor`).
+     * Returns `null` on size / format mismatch.
+     */
+    createClientFromSecretKey(
+        numEntries: number,
+        clientId: number,
+        secretKey: Uint8Array,
+    ): OnionPirClient | null;
+
+    // ----- Application helpers (Bitcoin-PIR cuckoo plumbing) -----
+
+    /** 64-bit splitmix64 finalizer; returns as JS number (safe < 2^53). */
+    splitmix64(x: number): number;
+
+    /** Single cuckoo bucket index for (entryId, key) mod numBins. */
+    cuckooHashInt(entryId: number, key: number, numBins: number): number;
+
+    /**
+     * Build a cuckoo hash table for a group of entries.
+     * - entries: sorted Uint32Array of entry ids in this group
+     * - keys: Uint32Array of numHashes*2 elements — each key as a
+     *   consecutive (lo32, hi32) pair
+     * - numBins: table size
+     * Returns Uint32Array of length numBins; bin == 0xFFFFFFFF means empty.
+     */
+    buildCuckooBs1(
+        entries: Uint32Array,
+        keys: Uint32Array,
+        numBins: number,
+    ): Uint32Array;
+}
+
+declare const createOnionPir: () => Promise<OnionPirModule>;
+export default createOnionPir;

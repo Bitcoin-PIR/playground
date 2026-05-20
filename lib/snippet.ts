@@ -1,0 +1,145 @@
+/**
+ * Backend-specific "what would I write in my wallet?" code snippets.
+ *
+ * These mirror the shape of `lib/playground-clients.ts` but with the
+ * scaffolding pulled out and the WASM init shown explicitly — the user
+ * pastes the snippet straight into their wallet codebase.
+ */
+
+import type { Backend } from '@/components/BackendSelector';
+
+export function buildSnippet(backend: Backend, address: string): string {
+  switch (backend) {
+    case 'dpf':
+      return DPF_SNIPPET.replaceAll('__ADDRESS__', address || 'bc1q…');
+    case 'harmonypir':
+      return HARMONY_SNIPPET.replaceAll('__ADDRESS__', address || 'bc1q…');
+    case 'onionpir':
+      return ONION_SNIPPET.replaceAll('__ADDRESS__', address || 'bc1q…');
+  }
+}
+
+const DPF_SNIPPET = `// DPF-PIR — two servers, low-latency, batch scans.
+// npm install pir-sdk-wasm
+
+import init, { WasmDpfClient } from 'pir-sdk-wasm';
+import { addressToScriptPubKey, scriptHash, hexToBytes }
+  from 'bitcoin-pir-web';
+import { AMD_TURIN_ARK_FINGERPRINT, PIR1_PIN, PIR2_TIER3_PIN }
+  from 'bitcoin-pir-web/attest-pin';
+
+await init();
+
+const client = new WasmDpfClient(
+  'wss://weikeng1.bitcoinpir.org',
+  'wss://weikeng2.bitcoinpir.org',
+);
+await client.connect();
+
+// Pinned-attestation (proves the server is running the binary the
+// operator built — required before sending any query).
+const att0 = await client.attest(0);
+const att1 = await client.attest(1);
+if (att1.binarySha256Hex !== PIR2_TIER3_PIN.binarySha256Hex) {
+  throw new Error('pir2 binary pin mismatch');
+}
+if (att1.launchMeasurementHex !== PIR2_TIER3_PIN.measurementHex) {
+  throw new Error('pir2 SEV-SNP MEASUREMENT pin mismatch');
+}
+att1.verifyVcekChain(AMD_TURIN_ARK_FINGERPRINT);  // AMD chain
+await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);
+
+// Address -> scripthash (HASH160 of scriptPubKey).
+const spkHex = addressToScriptPubKey('__ADDRESS__')!;
+const sh = scriptHash(hexToBytes(spkHex));  // 20 bytes
+
+// Query. Batch up to 8-16 addresses at once for amortised cost.
+const packed = sh;  // for a single query
+const [result] = await client.queryBatchRaw(packed, 0);
+
+console.log('balance (sats):', result.totalBalance);
+for (let i = 0; i < result.entryCount; i++) {
+  const u = result.getEntry(i);
+  console.log(\`  \${u.txid}:\${u.vout} = \${u.amountSats} sat\`);
+}
+
+await client.disconnect();
+`;
+
+const HARMONY_SNIPPET = `// HarmonyPIR — two servers + offline hint phase, optimised for bigger
+// batches.  Fetches a ~50 MB hint pool from the hint server once per
+// (db_id, master_key); subsequent queries amortise that cost.
+
+import init, { WasmHarmonyClient } from 'pir-sdk-wasm';
+import { addressToScriptPubKey, scriptHash, hexToBytes }
+  from 'bitcoin-pir-web';
+import { AMD_TURIN_ARK_FINGERPRINT, PIR1_PIN, PIR2_TIER3_PIN }
+  from 'bitcoin-pir-web/attest-pin';
+
+await init();
+
+const client = new WasmHarmonyClient(
+  'wss://weikeng1.bitcoinpir.org',  // hint
+  'wss://weikeng2.bitcoinpir.org',  // query
+);
+await client.connect();
+
+// Same attest + pin + channel-upgrade as DPF (see DPF snippet).
+const att0 = await client.attest(0);
+const att1 = await client.attest(1);
+await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);
+
+// Hint warm-up. Persist \`saveHints()\` to IndexedDB if you want to keep
+// the pool across page reloads — see web/src/harmonypir_hint_db.ts.
+await client.fetchHintsWithProgress(
+  await client.fetchCatalog(),
+  0,  // db_id
+  (p: { done: number; total: number; phase: string }) =>
+    console.log(\`hints: \${p.phase} \${p.done}/\${p.total}\`),
+);
+
+const spkHex = addressToScriptPubKey('__ADDRESS__')!;
+const sh = scriptHash(hexToBytes(spkHex));
+const [result] = await client.queryBatchRaw(sh, 0);
+
+console.log('balance (sats):', result.totalBalance);
+for (let i = 0; i < result.entryCount; i++) {
+  const u = result.getEntry(i);
+  console.log(\`  \${u.txid}:\${u.vout} = \${u.amountSats} sat\`);
+}
+
+await client.disconnect();
+`;
+
+const ONION_SNIPPET = `// OnionPIR — single-server FHE backend.  SEAL doesn’t compile to
+// wasm32, so the OnionPIR client is hand-rolled TypeScript.  Heavier
+// per-query than DPF; nice when you only need one address.
+
+import { OnionPirWebClient } from 'bitcoin-pir-web/onionpir_client';
+import { addressToScriptPubKey, scriptHash, hexToBytes }
+  from 'bitcoin-pir-web';
+
+const client = new OnionPirWebClient({
+  serverUrl: 'wss://weikeng1.bitcoinpir.org',
+});
+await client.connect();
+
+const spkHex = addressToScriptPubKey('__ADDRESS__')!;
+const sh = scriptHash(hexToBytes(spkHex));
+
+const [result] = await client.queryBatch([sh]);
+
+if (!result) {
+  console.log('no UTXOs');
+} else {
+  console.log('balance (sats):', result.totalSats);
+  for (const u of result.entries) {
+    const txidLE = Array.from(u.txid).reverse();
+    const txidHex = txidLE
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    console.log(\`  \${txidHex}:\${u.vout} = \${u.amount} sat\`);
+  }
+}
+
+client.disconnect();
+`;

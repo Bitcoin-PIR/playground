@@ -28,5 +28,10 @@
     "**/*.mdx",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "vendor/bitcoinpir-web/**/*.test.ts", "vendor/bitcoinpir-web/__tests__"]
+  "exclude": [
+    "node_modules",
+    "vendor/bitcoinpir-web/**/*.test.ts",
+    "vendor/bitcoinpir-web/__tests__",
+    "vendor/bitcoinpir-web/dpf.ts"
+  ]
 }
