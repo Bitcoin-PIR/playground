@@ -5,6 +5,7 @@ const config: Config = {
     './app/**/*.{ts,tsx,mdx}',
     './components/**/*.{ts,tsx}',
     './content/**/*.{md,mdx}',
+    './mdx-components.tsx', // added for /docs — registers root MDX component classes
   ],
   theme: {
     extend: {
