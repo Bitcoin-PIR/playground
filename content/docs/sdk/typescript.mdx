@@ -1,0 +1,325 @@
+# TypeScript / WASM SDK
+
+The TypeScript SDK is the recommended path for browser wallets and any
+Node-based environment. It's the wasm-pack output of the
+[`pir-sdk-wasm`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/pir-sdk-wasm)
+crate — the full Rust `pir-sdk-client` running inside the browser via
+WebAssembly.
+
+Same protocol, same [privacy invariants](/docs/privacy/invariants),
+same per-bucket Merkle verification as the native crates. No
+extension, no native helper.
+
+```bash
+npm install pir-sdk-wasm
+```
+
+## What's in the package
+
+| Class / function | Purpose |
+| --- | --- |
+| `WasmDpfClient` | Two-server DPF client. The default. |
+| `WasmHarmonyClient` | Two-server HarmonyPIR client with offline hint phase. |
+| `WasmQueryResult` | Per-script-hash result (UTXOs, balance, Merkle status). |
+| `WasmSyncResult` | A whole sync's worth of results, plus synced height. |
+| `WasmDatabaseCatalog` | The server-published catalog of available databases. |
+| `WasmAttestVerification` | Result of an `attest()` call — see [Attestation](/docs/privacy/attestation). |
+| `WasmBucketMerkleTreeTops` | Parsed tree-tops blob for standalone Merkle verification. |
+| `WasmAtomicMetrics` | Lock-free metrics counters bridged to JS. |
+| `initTracingSubscriber()` | Routes Rust `tracing` spans to the browser console. |
+| `computeSyncPlan()` | Compute an optimal sync plan from a catalog. |
+| `mergeDelta()` | Merge a delta payload onto a snapshot result. |
+| `verifyBucketMerkleItem()` | Walk one bin-Merkle proof from leaf to root. |
+| `decodeUtxoData()`, `decodeDeltaData()` | Parse raw bytes from the SDK. |
+| Low-level hash / cuckoo / codec primitives | `cuckooHash`, `deriveGroups`, `splitmix64`, `readVarint`, `xorBuffers`, … |
+
+> **No `WasmOnionClient`.** OnionPIR depends on Microsoft SEAL (C++)
+> which doesn't compile to `wasm32-unknown-unknown`. Browsers that
+> need single-server FHE use a hand-rolled TS port —
+> [`web/src/onionpir_client.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/onionpir_client.ts).
+
+## Initialization
+
+```ts
+import init, { WasmDpfClient } from 'pir-sdk-wasm';
+
+// Once per page or worker. Idempotent.
+await init();
+```
+
+`init()` loads the `.wasm` binary, installs a browser-friendly panic
+hook (so Rust panics surface as readable console messages instead of
+`RuntimeError: unreachable`), and returns when the module is ready.
+
+The `pir_sdk_wasm.d.ts` file ships full TypeScript types — including
+JSDoc preserved from the Rust source. Inline help and "go to
+definition" both work.
+
+## `WasmDpfClient`
+
+The DPF client is stateless. Construct, connect, query, disconnect.
+
+### Constructor
+
+```ts
+new WasmDpfClient(server0_url: string, server1_url: string)
+```
+
+Two `wss://` URLs. No I/O happens until `connect()`.
+
+### Lifecycle
+
+```ts
+client.connect(): Promise<void>
+client.disconnect(): Promise<void>
+client.isConnected: boolean   // readonly
+```
+
+`connect()` is idempotent. A second call while already connected is a
+no-op.
+
+### Sync (the high-level API)
+
+```ts
+client.sync(
+  scriptHashes: Uint8Array,        // packed 20*N bytes
+  lastHeight?: number | null,      // null = fresh sync
+): Promise<WasmSyncResult>
+```
+
+- `scriptHashes` is concatenated 20-byte HASH160s.
+- `lastHeight` is the last block height your wallet has fully synced
+  to. Pass `null` to fetch a fresh full snapshot; pass a height to
+  fetch only the delta chain since then.
+
+The returned `WasmSyncResult` carries one slot per input script hash.
+A slot that's `undefined` means the script hash is verified absent.
+
+```ts
+const sync = await client.sync(packed, lastHeight);
+
+for (let i = 0; i < sync.resultCount; i++) {
+  const r = sync.getResult(i);
+  if (!r) continue;
+  console.log(r.entryCount, r.totalBalance, r.merkleVerified);
+}
+
+console.log('synced height:', sync.syncedHeight);
+```
+
+### Sync with progress
+
+```ts
+client.syncWithProgress(
+  scriptHashes: Uint8Array,
+  lastHeight: number | null,
+  progress: (event: SyncProgressEvent) => void,
+): Promise<WasmSyncResult>
+```
+
+The `progress` callback fires for each step transition. The event has
+a `type` field discriminating `"step_start"`, `"step_progress"`,
+`"step_complete"`, `"complete"`, `"error"`.
+
+### Low-level query API
+
+```ts
+client.queryBatch(scriptHashes: Uint8Array, dbId: number): Promise<any>
+client.queryBatchRaw(scriptHashes: Uint8Array, dbId: number): Promise<any>
+```
+
+`queryBatch` runs one database lookup without the catalog or sync-plan
+orchestration. Returns a JSON array of length N. Each slot is either
+`null` (not found) or a `QueryResult` JSON object.
+
+`queryBatchRaw` is the **split-verify** path — same wire shape, but
+returns opaque `WasmQueryResult` handles with the inspector fields
+populated (`indexBins`, `chunkBins`, `matchedIndexIdx`). Per-query
+Merkle verification is **skipped** so you can persist results and
+verify later via `verifyMerkleBatch`. Both paths preserve the
+[four invariants](/docs/privacy/invariants).
+
+### Attestation + encrypted channel
+
+```ts
+client.attest(serverIndex: number): Promise<WasmAttestVerification>
+client.upgradeToSecureChannel(
+  serverStaticPub0: Uint8Array,
+  serverStaticPub1: Uint8Array,
+): Promise<void>
+```
+
+See [Attestation](/docs/privacy/attestation) for the full flow. After
+`upgradeToSecureChannel` succeeds, every subsequent frame on this
+client is AEAD-sealed (ChaCha20-Poly1305) end-to-end. Cloudflared (or
+any TLS-terminating intermediary) sees only ciphertext.
+
+### Catalog
+
+```ts
+client.fetchCatalog(): Promise<WasmDatabaseCatalog>
+```
+
+Returns the server's database catalog — the list of databases
+available with their parameters (`indexBins`, `chunkBins`, `tagSeed`,
+etc.). Used internally by `sync()`; exposed for callers that want to
+plan their own delta chain.
+
+### Observability
+
+```ts
+client.setMetricsRecorder(metrics: WasmAtomicMetrics): void
+client.clearMetricsRecorder(): void
+client.onStateChange(cb: (state: string) => void): void
+```
+
+`state` is one of `"connecting"`, `"connected"`, `"disconnected"`.
+
+`WasmAtomicMetrics.snapshot()` returns sixteen `bigint` counters —
+queries started/completed/errored, bytes sent/received, frames,
+connects/disconnects, per-query and per-roundtrip latency
+(min/max/total).
+
+## `WasmHarmonyClient`
+
+Same shape as `WasmDpfClient`, plus the hint-cache layer.
+
+### Constructor + connection
+
+```ts
+new WasmHarmonyClient(hintServerUrl: string, queryServerUrl: string)
+client.connect(): Promise<void>
+```
+
+The hint server (`weikeng1` in the reference deployment) is the one
+that mints the per-database hint blob; the query server (`weikeng2`)
+serves the per-query responses against it.
+
+### Sync + queries
+
+```ts
+client.sync(scriptHashes, lastHeight): Promise<WasmSyncResult>
+client.queryBatch(scriptHashes, dbId): Promise<any>
+client.queryBatchRaw(scriptHashes, dbId): Promise<any>
+client.syncWithProgress(scriptHashes, lastHeight, progress): Promise<WasmSyncResult>
+```
+
+Identical JS-facing contract to `WasmDpfClient`. Underneath, the hint
+phase runs lazily — the first query against a `dbId` issues a
+hint-fetch round trip; subsequent queries against the same database
+amortise across the loaded hints.
+
+### Hint management
+
+```ts
+client.fetchHintsWithProgress(
+  catalog: WasmDatabaseCatalog,
+  dbId: number,
+  progress: (e: { done: number; total: number; phase: string }) => void,
+): Promise<void>
+
+client.estimateHintSizeBytes(): number
+client.saveHints(): Uint8Array | null
+client.loadHints(bytes: Uint8Array, catalog: WasmDatabaseCatalog, dbId: number): void
+client.fingerprint(catalog: WasmDatabaseCatalog, dbId: number): Uint8Array
+client.minQueriesRemaining(): number | undefined
+client.dbId(): number | undefined
+client.setDbId(dbId: number): void
+client.setMasterKey(key: Uint8Array): void   // 16 bytes
+client.setPrpBackend(backend: number): void  // PRP_HMR12() | PRP_FASTPRP()
+```
+
+`saveHints()` returns a self-describing binary blob you can persist
+in IndexedDB. The blob's embedded 16-byte fingerprint covers
+`(masterKey, prpBackend, catalog.db_id)`; a `loadHints()` against a
+mismatched DB or master key fails cleanly rather than silently
+loading stale hints.
+
+`minQueriesRemaining()` is the per-group budget across every loaded
+HarmonyGroup. Use it to proactively refresh hints before the cache
+exhausts (the SDK rejects queries past `T - 1` per group).
+
+### Attestation + observability
+
+Identical to `WasmDpfClient`.
+
+## `WasmQueryResult`
+
+```ts
+class WasmQueryResult {
+  readonly entryCount: number;
+  readonly totalBalance: bigint;
+  readonly isWhale: boolean;
+  readonly merkleVerified: boolean;
+  getEntry(index: number): any;   // { txid, vout, amount }
+  indexBins(): any;               // inspector path only
+  chunkBins(): any;
+  matchedIndexIdx(): any;
+  rawChunkData(): Uint8Array | undefined;  // delta-DB queries
+  toJson(): any;
+  static fromJson(json: any): WasmQueryResult;
+}
+```
+
+`merkleVerified` is the single bit a wallet UI should read to decide
+whether to display the entries. `false` means at least one Merkle
+proof failed — treat the slot as untrusted, log it, and surface a
+warning to the user.
+
+`isWhale` means the script hash had too many UTXOs to fit in the
+fixed-size chunk slot; the SDK skips chunk decoding for whales. The
+INDEX entry is still committed to the Merkle root, so whale-exclusion
+is verifiable.
+
+## Free functions
+
+### `computeSyncPlan(catalog, lastSyncedHeight?)`
+
+Returns a `WasmSyncPlan` listing the databases to query in order
+(full snapshot, then any delta chain). Used internally by `sync()`;
+exposed for callers that want to drive the plan manually.
+
+### `mergeDelta(snapshot, deltaRaw)`
+
+Apply a delta payload (raw chunk bytes from a delta database query)
+onto a snapshot result. Returns a new `WasmQueryResult`.
+
+### `verifyBucketMerkleItem(binIndex, binContent, pbcGroup, siblingRowsFlat, treeTops)`
+
+Walk one bin-Merkle proof from leaf to root. The walker substitutes
+the running hash at each level's `(node_idx % 8)` position and
+combines with the 7 sibling hashes from the flat row. Returns `true`
+if the reconstruction matches the published root.
+
+### `bucketMerkleLeafHash`, `bucketMerkleParentN`, `bucketMerkleSha256`
+
+The primitive hashes used by the bin-Merkle scheme. The Rust client,
+WASM client, and any third-party verifier must agree on these — the
+SDK exposes them so a port doesn't need its own polyfill.
+
+### `xorBuffers(a, b)`
+
+Equal-length XOR. Convenience for DPF's `server0 ⊕ server1` fold.
+
+## ARC (anonymous rate-limited credentials)
+
+Optional. If the server is configured with rate limiting via ARC, the
+SDK provides `WasmArcPresentationState` for managing client-side
+credential presentations. See the ARC documentation in the main repo
+for the issuance + presentation flow.
+
+## What's not in this SDK
+
+- **OnionPIR.** Use the standalone TS client at
+  [`web/src/onionpir_client.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/onionpir_client.ts)
+  in the reference web app.
+- **Wallet derivation, BIP39, BIP32, BIP44.** Use your own wallet
+  stack; the SDK only handles the lookup layer.
+- **Transaction broadcast.** Use any mempool/RPC service.
+
+## Where to go next
+
+- [Quickstart](/docs/quickstart) — end-to-end working example.
+- [Rust SDK](/docs/sdk/rust) — the native client behind the WASM
+  surface.
+- [Wire format](/docs/protocol/wire-format) — what the SDK sends.

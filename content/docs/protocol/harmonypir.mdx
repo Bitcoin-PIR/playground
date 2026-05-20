@@ -1,0 +1,192 @@
+# HarmonyPIR protocol
+
+HarmonyPIR is the two-server backend optimised for **many queries
+per session**. It runs an **offline hint phase** that the client
+amortises across all subsequent queries — making each individual
+query cheaper than DPF, at the cost of a one-time setup latency.
+
+For the framing envelope shared across all backends see
+[Wire format](/docs/protocol/wire-format).
+
+## Conceptual flow
+
+```text
+┌─────────────────────────┐         ┌─────────────────────────┐
+│ Hint server (weikeng1)  │         │ Query server (weikeng2) │
+│ — mints the hint blob   │         │ — answers queries       │
+└────────────┬────────────┘         └────────────┬────────────┘
+             │                                   │
+             │  (1) REQ_HARMONY_HINTS            │
+             ◄──────────────────────────────────│
+             │                                   │
+             │  RESP_HARMONY_HINTS               │
+             ──────────────────────────────────►│
+                              (client stores hint, exits offline phase)
+             │                                   │
+             │                                   │
+             │                                   │  (2) REQ_HARMONY_QUERY
+             │                                  ◄─────────  per query
+             │                                   │
+             │                                   │  RESP_HARMONY_QUERY
+             │                                   ────────►
+             │                                              (... repeat up to T - 1 times,
+             │                                                  then re-run step 1)
+```
+
+The hint blob is a per-database secret-shared sketch. As long as the
+two servers don't collude, the **query server** processing
+`REQ_HARMONY_QUERY` cannot tell which row the client wants — the hint
+holds the secret.
+
+## Per-database parameters
+
+HarmonyPIR's database is split into groups, and each group is
+parameterised by:
+
+- `N` — total rows in the (padded) database.
+- `W` — entry width in bytes. For INDEX, `W = INDEX_SLOTS_PER_BIN *
+  INDEX_SLOT_SIZE = 68`. For CHUNK, `W = CHUNK_SLOTS_PER_BIN *
+  CHUNK_SLOT_SIZE = 132`.
+- `T` — segment count. Computed by `compute_balanced_t(N) ≈ √(2N)`.
+- `M = T - 1` — number of hint parities; also the per-query budget
+  before a refresh is needed.
+
+These are reported by `REQ_HARMONY_GET_INFO` (variant `0x40`).
+
+## Phase 1: offline hint fetch
+
+### Trigger
+
+The SDK runs the offline phase lazily — the first call to `sync()` or
+`queryBatch()` against a database fires `REQ_HARMONY_HINTS`. Once
+loaded, subsequent queries against the same `db_id` skip directly to
+phase 2.
+
+The browser surface for proactive prefetch is
+`fetchHintsWithProgress(catalog, db_id, progress)`. Use it to overlap
+the hint fetch with UI rendering.
+
+### Frame
+
+```text
+REQ_HARMONY_HINTS (0x41)
+  + 4B u32 db_id
+  + (per-group request schedule — see below)
+```
+
+The hint server responds with one **hint blob per group**. Each blob
+is `M × W` bytes (M hint parities, each W bytes wide). The client
+stashes these as the group's `H[]` array.
+
+### Persistence
+
+A loaded hint state can be serialised via `saveHints()` to a
+self-describing binary blob that includes a 16-byte fingerprint of
+`(masterKey, prpBackend, catalog.db_id)`. Persist to IndexedDB; on
+restart, restore via `loadHints(bytes, catalog, db_id)`.
+
+A `loadHints` call against a mismatched fingerprint rejects rather
+than silently loading stale hints.
+
+## Phase 2: per-query
+
+### PBC placement
+
+Same as DPF: the script hash derives 3 candidate PBC groups; the
+planner picks one. The cuckoo position within the chosen group is
+derived via the local PRP, **not** sent on the wire.
+
+### Frame
+
+```text
+REQ_HARMONY_QUERY (0x42)
+  + per-group request:
+    + 2B u16 group_id
+    + 4B u32 query_index
+    + (T - 1) × 4B u32 sorted distinct indices in [0, real_n)
+```
+
+**Each per-group request emits exactly `T - 1` sorted distinct u32
+indices, regardless of segment state, query count, or round.** This
+is [Invariant 4](/docs/privacy/invariants). Real non-empty segment
+cells contribute their actual DB row index; empty cells are padded
+with fresh random indices. The dummy positions are tracked locally so
+the response from the server can be XOR-cancelled out of the recovered
+answer.
+
+The server can only see `T - 1` sorted indices into `[0, real_n)`. It
+cannot tell which of them is the real query and which are padding —
+all look like uniform random distinct sorts.
+
+### Batched per-query
+
+For a multi-script-hash sync, the client batches the per-group
+requests into one `REQ_HARMONY_BATCH_QUERY` (variant `0x43`) frame.
+The payload is the concatenation of per-group requests in PBC-plan
+order.
+
+### Recovery
+
+Each per-group response carries `T - 1` entries of W bytes each, in
+the same sorted order as the request indices. The client:
+
+1. XOR-cancels the dummy positions (using the locally-tracked dummy
+   index list).
+2. XORs the remaining real-position responses with the stashed hint
+   parity `H[s]` for the segment `s` this query lives in.
+
+The result is the W-byte entry for the requested row.
+
+After the answer is recovered, the SDK **updates** the hint state
+(`finish_relocation`) so a subsequent query against the same hint
+trajectory is still secret-shared. This update is a local
+mutation; no wire traffic.
+
+### Pair queries
+
+For pipelined throughput, the SDK exposes `build_request_pair(q1,
+q2)` / `process_response_pair(r1, r2)`. Two queries go out together
+and two responses come back. The combined state update is equivalent
+to two sequential queries with the same RNG seed — see
+[`HarmonyGroup`'s rustdoc](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/harmonypir-wasm)
+for the eight-step soundness argument.
+
+## Refresh: when to re-run phase 1
+
+Each per-group hint budget is exactly `T - 1` queries. When the
+budget is exhausted, the next query against that group needs a fresh
+hint blob. The SDK rejects with `PirError::HintsExhausted` and the
+wallet must:
+
+```ts
+await client.fetchHintsWithProgress(catalog, dbId, progress);
+```
+
+The SDK surfaces the global minimum via `minQueriesRemaining()` so
+the wallet can schedule a refresh during idle time before the user
+hits the exhaustion wall.
+
+## Privacy properties
+
+HarmonyPIR satisfies the same [four
+invariants](/docs/privacy/invariants) as DPF. The protocol-specific
+one is [Invariant 4](/docs/privacy/invariants) — the per-group
+request always emits `T - 1` sorted indices, never fewer. A client
+that drops "send only non-empty segment cells" optimisations breaks
+that invariant and starts leaking how many hints have been consumed.
+
+## Implementation reference
+
+- TS adapter: [`web/src/harmonypir-adapter.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/harmonypir-adapter.ts)
+- Rust client: [`pir-sdk-client/src/harmony.rs`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/pir-sdk-client/src/harmony.rs)
+- Core HarmonyPIR: [`harmonypir`](https://github.com/Bitcoin-PIR/harmonypir)
+- WASM bindings: [`harmonypir-wasm`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/harmonypir-wasm)
+
+## Where to go next
+
+- [Wire format](/docs/protocol/wire-format) — the framing envelope.
+- [DPF protocol](/docs/protocol/dpf) — the no-state alternative.
+- [Privacy invariants](/docs/privacy/invariants) — why the per-group
+  index count is fixed.
+- [Troubleshooting](/docs/troubleshooting) — "hints exhausted" and
+  related errors.

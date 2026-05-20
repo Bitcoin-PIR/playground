@@ -1,0 +1,74 @@
+# Bitcoin PIR for wallet developers
+
+Bitcoin PIR lets a wallet look up UTXOs on a remote server **without
+telling the server which addresses it cares about**. Same data shape
+as Electrum, same `script_hash → [UTXO]` query — but the server cannot
+distinguish your query from any other.
+
+If you maintain a wallet, this matters. A normal Electrum-style server
+sees every `blockchain.scripthash.subscribe` your client makes. That
+log links every address you watch — and through chain analysis, every
+address derived from the same xpub — to your IP / circuit / session.
+PIR breaks that link.
+
+---
+
+## The three surfaces
+
+This site has three jobs. Pick whichever matches your moment:
+
+- **[Quickstart](/docs/quickstart)** — go from `npm install` to a
+  working DPF query in under ten minutes. Copy-paste TypeScript, real
+  server.
+- **[Playground](/playground)** — paste an address, run a real query
+  against the live server, and watch the SDK build the request. Same
+  code your wallet would write.
+- **[Wire explorer](/explorer)** — inspect every WebSocket frame the
+  client sends and confirm that the [four privacy
+  invariants](/docs/privacy/invariants) hold on your own traffic.
+
+---
+
+## What's in these docs
+
+This is the reference. Pages are short, code-first, and laid out
+around the wallet developer's job: integrate, debug, ship.
+
+- **Concepts** — [why PIR](/docs/concepts/why-pir), and how to choose
+  between [DPF, HarmonyPIR, and OnionPIR](/docs/concepts/backends).
+- **SDK** — the [TypeScript / WASM](/docs/sdk/typescript) surface
+  most wallets use, and the [native Rust](/docs/sdk/rust) crates if
+  you're building outside the browser.
+- **Protocol** — the [wire format](/docs/protocol/wire-format) and
+  per-backend specifics: [DPF](/docs/protocol/dpf),
+  [HarmonyPIR](/docs/protocol/harmonypir),
+  [OnionPIR](/docs/protocol/onionpir).
+- **Privacy** — the [four invariants](/docs/privacy/invariants)
+  spelled out for users *and* protocol auditors, plus how
+  [attestation](/docs/privacy/attestation) pins what's running on the
+  query server.
+- **Operations** — the [hint vs query endpoint
+  split](/docs/operations/endpoints), and what to do when something
+  goes wrong in [troubleshooting](/docs/troubleshooting).
+
+---
+
+## Live servers
+
+The reference deployment uses two servers — split deliberately so that
+the SEV-attested query server only ever sees query traffic, never
+hints:
+
+```
+wss://weikeng1.bitcoinpir.org   hint   (Hetzner, no SEV)
+wss://weikeng2.bitcoinpir.org   query  (VPSBG, SEV-SNP Tier 3)
+```
+
+Both speak [the same WebSocket protocol](/docs/protocol/wire-format).
+A wallet only needs to know *both* URLs and which is which; the SDK
+handles the rest.
+
+<Callout kind="tip" title="What to read next">
+If you're new, start with [Why PIR](/docs/concepts/why-pir) to ground
+the threat model, then jump to the [Quickstart](/docs/quickstart).
+</Callout>

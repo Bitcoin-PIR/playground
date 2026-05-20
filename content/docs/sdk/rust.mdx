@@ -1,0 +1,211 @@
+# Rust SDK
+
+If you're integrating outside the browser — a desktop wallet, a node,
+a Tauri-style hybrid, a back-end service — the native Rust crates are
+the right surface. They speak the same protocol and enforce the same
+[four privacy invariants](/docs/privacy/invariants) as the WASM
+client; the WASM build is just one of their compilation targets.
+
+## Crate layout
+
+| Crate | Role |
+| --- | --- |
+| `pir-core` | Shared primitives: Merkle, cuckoo, DPF, PBC, hashes, codec. |
+| `pir-sdk` | High-level types: `SyncPlanner`, `PirMetrics` trait, `AtomicMetrics`, error taxonomy. |
+| `pir-sdk-client` | Native + `wasm32` client. `DpfClient`, `HarmonyClient`, `OnionClient` (feature-gated). |
+| `pir-sdk-server` | Server wrapper over `pir-runtime-core` (`PirServerBuilder`, `PirServer`, `simple_server` bin). |
+| `pir-sdk-wasm` | WASM bindings — what the [TypeScript SDK](/docs/sdk/typescript) wraps. |
+| `pir-runtime-core` | Shared server primitives: admin, attest, channel, eval, handler, manifest, protocol, table. |
+
+## Publishing status
+
+<Callout kind="warn" title="Not yet on crates.io">
+The five publishable crates (`pir-core`, `pir-sdk`, `pir-runtime-core`,
+`pir-sdk-client`, `pir-sdk-server`) and the `pir-sdk-wasm` npm package
+are not yet published. The current blocker is the `libdpf` /
+`harmonypir` git dependencies — they need to land on crates.io
+(pinned by rev) or be vendored into `pir-core` before publishing. Use
+the repo via `git = "https://github.com/Bitcoin-PIR/Bitcoin-PIR"` in
+the meantime.
+</Callout>
+
+See [`PUBLISHING.md`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/PUBLISHING.md)
+in the main repo for the current state. Once published, the docs will
+be at:
+
+- [https://docs.rs/pir-sdk-client](https://docs.rs/pir-sdk-client)
+- [https://docs.rs/pir-sdk](https://docs.rs/pir-sdk)
+- [https://docs.rs/pir-core](https://docs.rs/pir-core)
+
+For now, browse the source on
+[GitHub](https://github.com/Bitcoin-PIR/Bitcoin-PIR) — every public
+type has rustdoc comments that the WASM bindings preserve verbatim.
+
+## Workspace setup
+
+Add a git dependency in `Cargo.toml`:
+
+```toml
+[dependencies]
+pir-sdk-client = { git = "https://github.com/Bitcoin-PIR/Bitcoin-PIR", rev = "<commit-sha>" }
+pir-sdk = { git = "https://github.com/Bitcoin-PIR/Bitcoin-PIR", rev = "<commit-sha>" }
+```
+
+Pin to a commit `rev` — the repo's branch tip moves frequently and
+the public surface is still settling.
+
+To enable the `OnionClient`, add the `onion` feature:
+
+```toml
+pir-sdk-client = { ..., features = ["onion"] }
+```
+
+OnionPIR depends on Microsoft SEAL via C++ bindings, so the host
+toolchain needs a working C++17 compiler. On a fresh machine:
+
+```bash
+# macOS
+brew install cmake
+# Debian/Ubuntu
+sudo apt install build-essential cmake
+```
+
+## DPF client — quick example
+
+```rust
+use pir_sdk_client::dpf::DpfClient;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let mut client = DpfClient::new(
+        "wss://weikeng1.bitcoinpir.org",
+        "wss://weikeng2.bitcoinpir.org",
+    )?;
+
+    client.connect().await?;
+
+    let script_hashes = vec![
+        [0x86, 0xee, 0x42, 0x29, 0x80, 0x4e, 0x21, 0x42,
+         0x8e, 0x32, 0x6f, 0x9d, 0xd2, 0xb2, 0x07, 0x90,
+         0xbc, 0xcb, 0xe9, 0x6a],
+    ];
+
+    let result = client.sync(&script_hashes, None).await?;
+    for (i, r) in result.results.iter().enumerate() {
+        match r {
+            Some(qr) => println!("{i}: {} UTXO(s), {} sats, merkle={}",
+                qr.entries.len(), qr.total_balance, qr.merkle_verified),
+            None => println!("{i}: not found"),
+        }
+    }
+
+    client.disconnect().await?;
+    Ok(())
+}
+```
+
+## Backend traits
+
+The three backend clients implement the same `PirClient` trait
+surface (defined in `pir-sdk-client::client`). A wallet that wants to
+be backend-agnostic can program against the trait:
+
+```rust
+use pir_sdk_client::{PirClient, dpf::DpfClient, harmony::HarmonyClient};
+
+async fn run_sync<C: PirClient>(client: &mut C, hashes: &[[u8; 20]]) -> ... {
+    client.connect().await?;
+    client.sync(hashes, None).await
+}
+```
+
+## Transport
+
+All three clients are async on top of `tokio::net::TcpStream` +
+`tokio-tungstenite` (native) or `WebSocket` (wasm32). The transport
+layer is abstracted as `PirTransport`:
+
+- `WsConnection` — native WebSocket.
+- `WasmWebSocketTransport` — browser WebSocket (only compiled for
+  `wasm32`).
+- `MockTransport` — used in tests; pluggable into integration tests.
+
+Custom transports (Tor, I2P, in-process) are possible — implement
+`PirTransport` and inject via the per-client constructor.
+
+## Observability
+
+Two surfaces.
+
+### `tracing` spans
+
+Every client method is annotated with
+`#[tracing::instrument(skip_all, fields(backend = "dpf"))]` (or the
+equivalent backend label). Install any `tracing-subscriber` to
+surface them:
+
+```rust
+tracing_subscriber::fmt::init();
+```
+
+### `PirMetrics` trait + `AtomicMetrics`
+
+Lock-free atomic counters tracking queries, bytes, frames, connects,
+latencies. Install via:
+
+```rust
+use pir_sdk::AtomicMetrics;
+use std::sync::Arc;
+
+let metrics = Arc::new(AtomicMetrics::default());
+client.set_metrics_recorder(metrics.clone());
+
+// Later
+let snapshot = metrics.snapshot();
+println!("queries: {}", snapshot.queries_completed);
+```
+
+The same `Arc<AtomicMetrics>` can be shared across multiple clients
+to aggregate counters.
+
+## Error handling
+
+`PirError` is the top-level error type. The `ErrorKind` enum
+discriminates retriable network errors from protocol errors from
+verification failures. Treat a `merkle_verified = false` result as a
+soft failure — log, surface to UI, do not retry blindly.
+
+## Native server
+
+If you're running your own server (mirroring the reference deployment),
+`pir-sdk-server` is the publishable wrapper:
+
+```rust
+use pir_sdk_server::{PirServerBuilder, ServerConfig, DatabaseLoader};
+
+let server = PirServerBuilder::new()
+    .config(ServerConfig::from_path("config.toml")?)
+    .databases(DatabaseLoader::from_dir("data/")?)
+    .build()
+    .await?;
+
+server.run().await?;
+```
+
+Or use the `simple_server` binary that ships with the crate:
+
+```bash
+cargo run --bin simple_server -- --config config.toml --data data/
+```
+
+See [Operations / endpoints](/docs/operations/endpoints) for the
+deployment shape the reference servers use.
+
+## Where to go next
+
+- [TypeScript / WASM SDK](/docs/sdk/typescript) — the same protocol,
+  for browser wallets.
+- [Wire format](/docs/protocol/wire-format) — what `connect()` /
+  `sync()` are doing on the wire.
+- [Backend comparison](/docs/concepts/backends) — picking between
+  DPF, HarmonyPIR, and OnionPIR.

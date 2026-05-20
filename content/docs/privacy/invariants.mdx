@@ -1,0 +1,183 @@
+# The four privacy invariants
+
+Bitcoin PIR's privacy claim is not "the server promises not to look".
+It's "an honest implementation of the protocol cannot leak certain
+properties, no matter what the server does, because the byte shape on
+the wire does not depend on them".
+
+This page states those properties precisely. Four invariants. Each
+has a one-line user-facing claim (what a wallet user gets) and a
+technical statement (the wire-shape property a maintainer must
+preserve).
+
+If you're auditing an SDK fork, deploying your own server, or just
+want to confirm what the wire actually carries, read this end to end.
+If you only want a yes/no answer for users, the four user-facing
+lines above each card are the answer.
+
+<Callout kind="note" title="Where this proof lives">
+These invariants are mechanized in EasyCrypt
+([proofs/easycrypt/](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/proofs/easycrypt))
+as a simulator-property argument — 31 lemmas, zero `admit`s. Pure
+helpers are also checked by Kani (18+ harnesses). At every commit,
+30+ integration tests verify the byte shape against the live Hetzner
+deployment. See [VERIFICATION_OVERVIEW.md](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/docs/VERIFICATION_OVERVIEW.md)
+for the full picture, including the scope split between what we
+mechanize and what we cite from the underlying primitives' papers.
+</Callout>
+
+## Threat model in one paragraph
+
+A determined adversary observes the entire WebSocket traffic between
+your wallet and both servers. They know the protocol, the codebase,
+the database schema. They cannot break the underlying primitives
+(DPF privacy, FHE IND-CPA, PRP indistinguishability — these are
+cited from the primitives' papers). What can they still learn from
+the wire shape alone? The four invariants below close every leakage
+axis the wire would otherwise expose.
+
+---
+
+<Invariant
+  index={1}
+  title="INDEX Merkle item-count symmetry"
+  userFacing="The server cannot tell whether your address is in its database, nor — for found addresses — which of two possible cuckoo positions it matched at."
+  technical="Every INDEX query emits exactly INDEX_CUCKOO_NUM_HASHES = 2 Merkle items, regardless of outcome (found at h=0, found at h=1, not-found, or whale). The per-Merkle-level sibling pass count is identical across all queries.">
+
+**Why this matters.** Cuckoo hashing places each scripthash into one
+of two bins. Pre-fix, an honest client would short-circuit on a found
+match and only emit one Merkle proof; a not-found client would emit
+two. The server reading the level-by-level pass count could
+distinguish them — and worse, distinguish *which* of the two
+positions a found query matched at. The fix is to always probe both
+positions and always emit two items.
+
+In the SDK this lives in `items_from_trace` inside each backend's
+client (`pir-sdk-client/src/{dpf,harmony,onion}.rs`).
+
+</Invariant>
+
+<Invariant
+  index={2}
+  title="CHUNK round-presence symmetry"
+  userFacing="The server cannot tell whether your query was found or not-found, even by checking whether any CHUNK traffic followed your INDEX request."
+  technical="Every INDEX query — found, not-found, or whale — triggers at least one K_CHUNK-padded CHUNK PIR round. An all-not-found batch still emits one fully synthetic CHUNK round, byte-identical in shape to a real one.">
+
+**Why this matters.** A found query needs to fetch the UTXO chunks;
+a not-found query doesn't. Without a fix, the *presence* of a CHUNK
+round after the INDEX phase would leak found-vs-not-found per query.
+The SDK forces a fully synthetic K_CHUNK-padded round in the
+not-found path so the wire shape is identical.
+
+In the SDK this is enforced by `query_chunk_level` (DPF, Harmony) and
+the empty-round fallback in OnionPIR (`onion.rs::query_chunk_level`
+and `web/src/onionpir_client.ts::queryBatch`).
+
+</Invariant>
+
+<Invariant
+  index={3}
+  title="INDEX Merkle group-symmetry"
+  userFacing="The server cannot infer which addresses you queried by looking at how their Merkle proofs spread across server groups."
+  technical="INDEX Merkle items in a multi-query batch distribute across PBC groups via pbc_plan_rounds(derive_groups_3, K, 3, 500), not via derive_groups_3(scripthash, K)[0] directly. The wire-observable max_items_per_group_per_level is exactly 2, independent of the batch's collision pattern.">
+
+**Why this matters.** Pre-fix, the SDK assigned each scripthash's
+INDEX Merkle items to its first candidate group
+(`derive_groups_3[...][0]`). Two scripthashes whose first candidate
+group collided would accumulate 4 Merkle items in that group — the
+wire-observable per-group pass count would jump from 2 to 4. That
+count is a function of the batch's collision pattern, and the
+collision pattern is a function of the scripthashes the user
+queried. The fix is to distribute via the PBC planner so the
+per-group count is content-independent.
+
+In the SDK this lives in `query_index_phase_batched` (DPF and Harmony)
+and the gid-level PBC plan inside the OnionPIR client.
+
+</Invariant>
+
+<Invariant
+  index={4}
+  title="HarmonyPIR per-group request-count symmetry"
+  userFacing="When using HarmonyPIR, the server cannot count how many hints you've used or estimate when your client will refresh — only the bare protocol-level position in the session."
+  technical="Every HarmonyPIR per-group query slot sends exactly T − 1 sorted distinct u32 indices drawn from [0, real_n), regardless of segment state or query count. Empty cells are padded with random distinct indices; their server responses are XOR-cancelled out of the recovered answer.">
+
+**Why this matters.** A naive HarmonyPIR client would only request
+non-empty segment cells, sending a variable number of indices per
+round. That count drifts upward as hints are consumed and as cells
+fill — the server could fit the trajectory, distinguish real-query
+slots from padding dummies, estimate queries-since-last-rehint, and
+predict when a fresh offline phase is imminent. The fix is the
+fixed-count pad with XOR-cancellation: every request is exactly
+`(T − 1) × 4` bytes, regardless of state.
+
+In the SDK this lives in `HarmonyGroup::build_request` and
+`build_synthetic_dummy` ([`harmonypir-wasm/src/lib.rs`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/harmonypir-wasm)).
+
+</Invariant>
+
+---
+
+## What an adversary can still observe
+
+These invariants close everything privacy-critical the wire would
+otherwise leak about *what* you queried. Two narrow channels remain,
+both documented as explicit trade-offs:
+
+### Approximate per-query UTXO count
+
+A found query emits its **real** count of CHUNK Merkle items —
+roughly one per UTXO. A 1-UTXO address and a 100-UTXO address emit
+different counts. This is mild in practice — about 99% of mainnet
+addresses have exactly one chunk — and was a deliberate trade-off:
+the M=16 pad that hid this count forced every query (including the
+not-found path) to fetch sixteen chunks of data, inflating chunk-layer
+cost ~16x for ~1% of users.
+
+Found-vs-not-found *itself* remains hidden by invariant #2 — the
+server doesn't see whether you found a result, only the approximate
+UTXO count of found results.
+
+### Side channels outside the wire shape
+
+By design, the EasyCrypt model does not cover:
+
+- **Timing.** Wall-clock latency, packet inter-arrival, CPU side
+  channels are outside `transcript`. An adversary who measures
+  latency learns strictly more than the wire shape.
+- **Network metadata.** TCP / TLS / WebSocket framing, IP, TLS
+  handshake. By hypothesis the wire-shape observer sees only message
+  payloads.
+- **Compression artifacts.** Per-message-deflate and TLS compression
+  are off in production.
+
+Wallets that need timing-channel-resistance should add their own
+timing jitter on top of the SDK.
+
+## Verifying invariants on your own traffic
+
+Open the [Wire explorer](/explorer) and run a query. For every frame
+the SDK sends, the explorer:
+
+- Decodes the request type and per-group payload counts.
+- Asserts the K=75 / K_CHUNK=80 padding holds.
+- Asserts the two-item INDEX Merkle and `T − 1`-index HarmonyPIR
+  request shapes.
+- Surfaces any violation as a red badge — that would be a
+  **regression** in the SDK and worth filing immediately.
+
+If you've made local changes to the SDK and want to confirm a
+property still holds, the
+[`leakage_integration_test.rs`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/pir-sdk-client/tests/leakage_integration_test.rs)
+suite is the canonical regression net: ~30 tests that compare two
+queries with different content and assert byte-identical transcripts.
+
+## Where to go next
+
+- [Attestation](/docs/privacy/attestation) — how to verify the
+  *binary* serving these invariants is actually the one the operator
+  published.
+- [Why PIR](/docs/concepts/why-pir) — the threat model these
+  invariants close, in plain language.
+- [Wire format](/docs/protocol/wire-format) — the codec a reader
+  would use to verify the invariants directly from a packet capture.

@@ -1,0 +1,190 @@
+# Wire format
+
+Every PIR exchange happens over a single WebSocket per server. All
+three backends — DPF, HarmonyPIR, OnionPIR — share the same outer
+envelope and codec; they only differ in which **variant codes** they
+emit on the inside. This page is the reference for the envelope and
+the shared variants. Per-backend variants are linked at the bottom.
+
+## Frame envelope
+
+Each WebSocket message is one **length-prefixed binary frame**:
+
+```text
++----------+-------------+--------------------+
+| 4B u32   | 1B u8       | payload bytes      |
+| total_len| variant_byte| variant-specific   |
++----------+-------------+--------------------+
+```
+
+- `total_len` (little-endian) is the length of `variant_byte +
+  payload`. It does *not* include the four bytes of the prefix
+  itself.
+- `variant_byte` identifies the request or response type — see
+  [the variant table](#variant-codes) below.
+- `payload` shape depends on the variant.
+
+The codec is implemented in
+[`web/src/protocol.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/protocol.ts)
+(TS reference) and `pir-runtime-core::protocol` (Rust authoritative).
+A wire-level recorder is in the [Wire explorer](/explorer).
+
+## Encrypted channel
+
+Once `upgradeToSecureChannel` has run, the frame above is wrapped in
+an outer AEAD envelope (ChaCha20-Poly1305). Every byte after the
+upgrade frame is sealed. The plaintext shape inside the AEAD envelope
+is unchanged — same codec, same variants.
+
+The AEAD envelope contains:
+
+```text
++--------+---------+----------------+
+| 12B    | ciphertext              |
+| nonce  | (frame || auth-tag 16B) |
++--------+----------+--------------+
+```
+
+The X25519 static keys are obtained via `attest()` and verified
+against the operator pin — see [Attestation](/docs/privacy/attestation).
+
+## Variant codes
+
+The shared variant codes (relevant to DPF + HarmonyPIR + Merkle):
+
+| Code   | Request                              | Response                               |
+| ------ | ------------------------------------ | -------------------------------------- |
+| `0x00` | `REQ_PING`                           | `RESP_PONG`                            |
+| `0x01` | `REQ_GET_INFO`                       | `RESP_INFO`                            |
+| `0x02` | `REQ_GET_DB_CATALOG`                 | `RESP_DB_CATALOG`                      |
+| `0x03` | `REQ_GET_INFO_JSON`                  | `RESP_INFO_JSON`                       |
+| `0x04` | `REQ_RESIDENCY`                      | `RESP_RESIDENCY`                       |
+| `0x08` | `REQ_CREDENTIAL_PRESENT` (ARC)       | `RESP_CREDENTIAL_OK`                   |
+| `0x09` | `REQ_CASHU_BAT_PRESENT`              | `RESP_CASHU_BAT_OK`                    |
+| `0x11` | `REQ_INDEX_BATCH` (DPF)              | `RESP_INDEX_BATCH`                     |
+| `0x21` | `REQ_CHUNK_BATCH` (DPF)              | `RESP_CHUNK_BATCH`                     |
+| `0x31` | `REQ_MERKLE_SIBLING_BATCH` (legacy)  | `RESP_MERKLE_SIBLING_BATCH`            |
+| `0x32` | `REQ_MERKLE_TREE_TOP` (legacy)       | `RESP_MERKLE_TREE_TOP`                 |
+| `0x33` | `REQ_BUCKET_MERKLE_SIB_BATCH`        | `RESP_BUCKET_MERKLE_SIB_BATCH`         |
+| `0x34` | `REQ_BUCKET_MERKLE_TREE_TOPS`        | `RESP_BUCKET_MERKLE_TREE_TOPS`         |
+| `0x40` | `REQ_HARMONY_GET_INFO`               | `RESP_HARMONY_INFO`                    |
+| `0x41` | `REQ_HARMONY_HINTS`                  | `RESP_HARMONY_HINTS`                   |
+| `0x42` | `REQ_HARMONY_QUERY`                  | `RESP_HARMONY_QUERY`                   |
+| `0x43` | `REQ_HARMONY_BATCH_QUERY`            | `RESP_HARMONY_BATCH_QUERY`             |
+| `0x53` | `REQ_ONIONPIR_MERKLE_INDEX_SIBLING`  | `RESP_ONIONPIR_MERKLE_INDEX_SIBLING`   |
+| `0x54` | `REQ_ONIONPIR_MERKLE_INDEX_TREE_TOP` | `RESP_ONIONPIR_MERKLE_INDEX_TREE_TOP`  |
+| `0x55` | `REQ_ONIONPIR_MERKLE_DATA_SIBLING`   | `RESP_ONIONPIR_MERKLE_DATA_SIBLING`    |
+| `0x56` | `REQ_ONIONPIR_MERKLE_DATA_TREE_TOP`  | `RESP_ONIONPIR_MERKLE_DATA_TREE_TOP`   |
+| `0xFF` | (n/a)                                | `RESP_ERROR`                           |
+
+OnionPIR uses its own request variants outside this table — see
+[OnionPIR protocol](/docs/protocol/onionpir).
+
+## Batch query payload
+
+`REQ_INDEX_BATCH`, `REQ_CHUNK_BATCH`, and the per-bucket Merkle
+sibling-batch requests all share a `BatchQuery` payload:
+
+```text
++------------+--------+-------------+----------+----------+-----+----------+
+| 2B u16     | 1B u8  | 1B u8       | per group:                          |
+| round_id   | count  | keys_per_grp| 2B u16 len | key_bytes (len bytes)  |
++------------+--------+-------------+----------+----------+-----+----------+
+                                    | (repeated count × keys_per_grp times)|
+                                    +-------------------------------------+
+
+(optional trailing 1B db_id — only appended when non-zero, for backward compat)
+```
+
+- `count` is the number of PBC groups in the batch. For INDEX it's
+  always K = 75. For CHUNK it's always K_CHUNK = 80. These are
+  **fixed** — see [the four invariants](/docs/privacy/invariants).
+- `keys_per_group` is the number of DPF keys per group. Index level
+  is 2, chunk level is 3 (one per cuckoo position within the bin).
+- The per-group keys are concatenated in order.
+
+The `db_id` byte is omitted when querying the main UTXO database
+(`db_id = 0`), kept for backwards compatibility with older servers.
+For deltas (`db_id ≥ 1`), it's appended.
+
+## Batch result payload
+
+Symmetric to the query — same `round_id`, same per-group structure,
+but carrying response shares instead of keys:
+
+```text
++------------+--------+-------------+-------------------------------+
+| 2B u16     | 1B u8  | 1B u8       | per group:                    |
+| round_id   | count  | per_group   | 2B u16 len | result bytes     |
++------------+--------+-------------+-------------------------------+
+                                    | (repeated count × per_group times)|
+                                    +-------------------------------+
+```
+
+`per_group` matches `keys_per_group` from the request (2 for INDEX,
+3 for CHUNK).
+
+## Length-prefix encoding example
+
+A `Ping` request is the shortest valid frame: one byte of payload
+(the variant), four bytes of length prefix.
+
+```text
+01 00 00 00   00
+^^^^^^^^^^^   ^^
+length=1      REQ_PING
+```
+
+A `GetInfo` response (`RESP_INFO`) carries the published catalog
+parameters:
+
+```text
++----+----+----+----+----+--------+--------+----+----+--------+
+| 4B length-prefix    | 1B | 4B    | 4B    | 1B | 1B | 8B    |
+| (total below)       | 01 | bins  | bins  | K  | K  | seed  |
++--------------------+----+--------+--------+----+----+--------+
+                          INDEX    CHUNK   IDX  CHK  tag
+                          bins/    bins/   K    K    seed
+                          table    table              (u64 LE)
+```
+
+## Error frames
+
+A `RESP_ERROR` (`0xFF`) carries a UTF-8 message:
+
+```text
++----+----+--------+-------------------+
+| 4B length         | 1B | 4B    | len bytes
++----+----+--------+----+--------+-----+
+                    FF   message_len   message
+```
+
+The SDK surfaces this as `PirError` (Rust) / a rejected promise
+(WASM).
+
+## Padding contract (privacy-critical)
+
+The codec itself is content-agnostic, but **the SDK must always emit
+the padded shapes**:
+
+- INDEX batches: exactly `count = K = 75` groups, `keys_per_group = 2`.
+- CHUNK batches: exactly `count = K_CHUNK = 80` groups,
+  `keys_per_group = 3`.
+- HarmonyPIR per-group requests: exactly `T − 1` sorted u32 indices.
+
+A wire observer that watches a request whose `count` deviates from
+these constants is looking at a regression in the SDK or a non-SDK
+client. The reference implementation enforces these counts in
+`pir-sdk-client` and `pir-sdk-wasm`; the [Wire
+explorer](/explorer) asserts them frame-by-frame.
+
+## Where to go next
+
+- [DPF protocol](/docs/protocol/dpf) — what fills the
+  `REQ_INDEX_BATCH` / `REQ_CHUNK_BATCH` payloads.
+- [HarmonyPIR protocol](/docs/protocol/harmonypir) — the offline
+  hint phase + per-group request format.
+- [OnionPIR protocol](/docs/protocol/onionpir) — the FHE-specific
+  request variants.
+- [Privacy invariants](/docs/privacy/invariants) — why the padded
+  counts above are mandatory.
