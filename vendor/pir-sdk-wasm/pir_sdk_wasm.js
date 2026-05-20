@@ -2537,6 +2537,66 @@ export function deriveGroups(script_hash, k) {
 }
 
 /**
+ * Decode the per-group sub-query `count` fields from a
+ * `REQ_HARMONY_BATCH_QUERY` (opcode `0x43`) frame, returning one entry
+ * per `(group, sub_query)` slot in declaration order so JS can assert
+ * **HarmonyPIR Per-Group Request-Count Symmetry** on observed traffic.
+ *
+ * # Input shapes accepted
+ *
+ * `frame` may be supplied in either of the two shapes a wire-explorer
+ * is likely to capture:
+ *
+ * 1. **Full wire frame** — `[4B payload_len LE][1B opcode = 0x43][payload]`,
+ *    matching the bytes emitted on the WebSocket by
+ *    `pir_runtime_core::protocol::Request::encode`. Auto-detected when
+ *    `frame.len() >= 5`, the leading u32 equals `frame.len() - 4`, and
+ *    `frame[4] == 0x43`.
+ * 2. **Stripped payload** — `[1B opcode = 0x43][payload]`, the shape a
+ *    middleware that already peels the length envelope would expose.
+ *    Auto-detected when the full-frame check fails but `frame[0] == 0x43`.
+ * 3. **Raw payload** — just `[payload]` (no envelope, no opcode). Used
+ *    as the fallback when neither (1) nor (2) match. Callers who pre-
+ *    strip the opcode should hit this branch.
+ *
+ * # Output
+ *
+ * A flat `Uint32Array` of length `num_groups × sub_queries_per_group`,
+ * in `(group, sub_query)` row-major order — i.e. the first
+ * `sub_queries_per_group` entries belong to group 0, the next slab to
+ * group 1, and so on. JS callers reshape with the same
+ * `sub_queries_per_group` they read elsewhere in the frame.
+ *
+ * Symmetry-check pattern:
+ * ```text
+ * const counts = harmony_decode_counts(frameBytes);
+ * const t = readTFromHintsResponseElsewhere(); // T from REQ_HARMONY_HINTS
+ * const ok = counts.every(c => c === t - 1);   // privacy invariant
+ * ```
+ *
+ * # Errors
+ *
+ * Returns `Err(JsError)` for: empty input, opcode not `0x43` (when the
+ * envelope check fails on a non-payload-shaped buffer), truncated header
+ * (< 6 payload bytes), per-group `count` declared larger than the
+ * remaining payload, or any other inconsistency that would also trip
+ * the canonical native decoder.
+ * @param {Uint8Array} frame
+ * @returns {Uint32Array}
+ */
+export function harmony_decode_counts(frame) {
+    const ptr0 = passArray8ToWasm0(frame, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.harmony_decode_counts(ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v2;
+}
+
+/**
  * Install a [`tracing-wasm`] subscriber as the global `tracing` default.
  *
  * Call once at app startup after `await init()`. Subsequent calls are
@@ -3153,22 +3213,22 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 272, function: Function { arguments: [Externref], shim_idx: 273, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 271, function: Function { arguments: [Externref], shim_idx: 272, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h490263039c0c107c, wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 388, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 389, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 387, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 388, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h05758780b86cf271, wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 388, function: Function { arguments: [NamedExternref("Event")], shim_idx: 389, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 387, function: Function { arguments: [NamedExternref("Event")], shim_idx: 388, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h05758780b86cf271, wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14_2);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 388, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 389, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 387, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 388, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h05758780b86cf271, wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14_3);
             return ret;
         },

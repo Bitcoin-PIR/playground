@@ -66,6 +66,8 @@ export const REQ_OPCODES: Record<number, string> = {
   0x41: 'HARMONY_HINTS',
   0x42: 'HARMONY_QUERY',
   0x43: 'HARMONY_BATCH_QUERY',
+  0x44: 'HARMONY_HINTS_V2',
+  0x46: 'HARMONY_HINTS_V2_HALF',
   0x50: 'ONION_REGISTER_KEYS',
   0x51: 'ONION_INDEX_QUERY',
   0x52: 'ONION_CHUNK_QUERY',
@@ -96,6 +98,7 @@ export const RESP_OPCODES: Record<number, string> = {
   0x41: 'HARMONY_HINTS',
   0x42: 'HARMONY_QUERY',
   0x43: 'HARMONY_BATCH_QUERY',
+  0x44: 'HARMONY_HINTS_KEY',
   0x50: 'ONION_KEYS_ACK',
   0x51: 'ONION_INDEX_RESULT',
   0x52: 'ONION_CHUNK_RESULT',
@@ -147,6 +150,19 @@ export interface CapturedFrame {
   keysPerGroup: number | null;
   /** First 32 raw bytes hex-encoded for the UI preview column. */
   hexPreview: string;
+  /**
+   * Full raw bytes, copied at capture time. Only retained for opcodes
+   * that have a JS-side decoder (currently TX 0x42 HARMONY_QUERY and
+   * TX 0x43 HARMONY_BATCH_QUERY — consumed by `harmony_decode_counts`
+   * for the Per-Group Request-Count Symmetry invariant). Undefined
+   * for all other frames to avoid retaining ~MB-scale payloads.
+   */
+  rawBytes?: Uint8Array;
+}
+
+function shouldKeepRawBytes(opcode: number | null, direction: FrameDirection): boolean {
+  if (direction !== 'tx' || opcode === null) return false;
+  return opcode === 0x42 || opcode === 0x43;
 }
 
 // ─── Parsing one frame's leading bytes ───────────────────────────────────────
@@ -409,6 +425,10 @@ export class FrameTap {
       keysPerGroup: klass.keysPerGroup,
       hexPreview: bytesToHex(raw, 32),
     };
+    if (shouldKeepRawBytes(klass.opcode, direction)) {
+      // Copy detaches from any reused ArrayBuffer the WS may recycle.
+      frame.rawBytes = new Uint8Array(raw);
+    }
     this.frames.push(frame);
     // Snapshot listeners so a listener that disposes doesn't break iteration.
     const ls = Array.from(this.listeners);
