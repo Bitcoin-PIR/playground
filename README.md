@@ -33,15 +33,17 @@ changes and commit the diff.
 - `wss://weikeng1.bitcoinpir.org` — hint server (Hetzner, no SEV)
 - `wss://weikeng2.bitcoinpir.org` — query server (VPSBG, SEV-SNP Tier 3)
 
-See [`/docs/operations/endpoints`](app/docs) for the hint/query split.
+See [`content/docs/operations/endpoints.mdx`](content/docs/operations/endpoints.mdx)
+(or the deployed [Live endpoints](https://sdk.bitcoinpir.org/docs/operations/endpoints)
+page) for the hint/query split.
 
 ## Repo layout
 
 ```
 app/                      Next.js App Router pages
-  playground/             SDK playground (feat/playground)
-  explorer/               Wire explorer (feat/explorer)
-  docs/                   API reference (feat/docs)
+  playground/             SDK playground (single-address query demo)
+  explorer/               Wire explorer (per-frame WebSocket capture)
+  docs/                   API reference (MDX, dynamic-route)
 components/               Shared React components
 content/docs/             MDX sources for the docs site
 lib/                      Shared helpers (WASM loader, endpoints, constants)
@@ -51,6 +53,10 @@ vendor/
 scripts/
   sync-vendor.sh          Resync the vendor/ tree from the main repo
 ```
+
+See [`CLAUDE.md`](CLAUDE.md) for the full project memory: deployment
+topology, vendor convention, privacy-invariant matrix, server pins,
+build commands, and open follow-ups.
 
 ## License
 

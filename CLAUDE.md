@@ -69,7 +69,7 @@ vendor/
   SOURCE_COMMIT.txt       BitcoinPIR commit hash this vendor was synced from
   README.md               vendor docs + sync instructions
   pir-sdk-wasm/           wasm-pack output: pir_sdk_wasm.{js,d.ts,_bg.wasm}
-  bitcoinpir-web/         OnionPIR TS client + 24 shared TS files from
+  bitcoinpir-web/         OnionPIR TS client + 22 shared TS files from
                           BitcoinPIR/web/src/
 public/
   CNAME                   sdk.bitcoinpir.org (binds Pages custom domain)
@@ -86,8 +86,8 @@ mdx-components.tsx        MDX prose styles + registers <Callout>, <Invariant>,
 next.config.mjs           static export config (see Stack & deployment above)
 tailwind.config.ts        content: app/components/content/mdx-components.tsx
 tsconfig.json             path aliases: @/*, @vendor/web/*, @vendor/wasm,
-                          pir-sdk-wasm
-.claude/launch.json       preview server config (port 3200)
+                          @vendor/wasm/*, pir-sdk-wasm
+.claude/launch.json       preview server config (port 3000)
 ```
 
 ---

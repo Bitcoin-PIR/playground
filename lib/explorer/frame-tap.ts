@@ -35,7 +35,7 @@
  *   Reassembled into a logical message before invariant inspection.
  */
 
-import { K, K_CHUNK, INDEX_CUCKOO_NUM_HASHES } from '@/vendor/bitcoinpir-web/constants';
+import { K, K_CHUNK, INDEX_CUCKOO_NUM_HASHES } from '@vendor/web/constants';
 
 // Re-export so consumers can import everything from this module.
 export const EXPECTED_K = K;

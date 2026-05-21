@@ -1,23 +1,15 @@
 # Contributing
 
-## Branches
+## Branching
 
-We develop the three surfaces in parallel:
+Single-trunk: develop on a topic branch off `main`, open a PR, merge
+to `main`. The original parallel-feature-branch workflow
+(`feat/playground` / `feat/explorer` / `feat/docs`) that bootstrapped
+the repo has been folded into `main` since the three surfaces
+shipped.
 
-| Branch | Owns |
-| --- | --- |
-| `main` | Shared scaffolding, layout, vendor, MIT LICENSE, CI |
-| `feat/playground` | `app/playground/**`, playground-specific components |
-| `feat/explorer` | `app/explorer/**`, explorer-specific components |
-| `feat/docs` | `app/docs/**`, `content/docs/**`, MDX components |
-
-Rebase your feature branch on `main` before opening a PR. Merge order is
-docs → playground → explorer to minimize conflicts.
-
-**Shared surface ownership.** Anything under `components/`, `lib/`, `vendor/`,
-or the root config files belongs to `main`. If your feature needs a new
-shared component or lib helper, open a small PR to `main` first, get it
-merged, then rebase your feature branch.
+See [`CLAUDE.md`](CLAUDE.md) for the project memory and operational
+context that should inform any change.
 
 ## Vendor sync
 

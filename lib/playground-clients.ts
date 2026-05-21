@@ -406,9 +406,12 @@ export async function ensureOnionWasmFactory(): Promise<void> {
   if (g.__onionpirWasmFactory) return;
   // `webpackIgnore: true` tells webpack to leave the import alone; the
   // browser's native ESM loader fetches the .mjs from /public/wasm/.
-  // On GitHub Pages the site is served under `/playground/`, so the
-  // bare `/wasm/onionpir_client.mjs` 404s — prepend the build-time
-  // basePath (empty in dev, `/playground` on Pages).
+  // The site now serves from the root of sdk.bitcoinpir.org (custom
+  // domain — see next.config.mjs), so `NEXT_PUBLIC_BASE_PATH` is the
+  // empty string and the resolved URL is just `/wasm/...`. The `?? ''`
+  // is defensive in case anyone ever reverts to the bitcoin-pir.github.io/playground/
+  // subpath, in which case basePath would be `/playground` and the
+  // URL `${basePath}/wasm/...` still resolves correctly.
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
   const url = `${basePath}/wasm/onionpir_client.mjs`;
   const mod = (await import(/* webpackIgnore: true */ /* @vite-ignore */ url)) as {

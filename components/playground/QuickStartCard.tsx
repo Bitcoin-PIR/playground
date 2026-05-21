@@ -5,7 +5,7 @@ import Link from 'next/link';
 export function QuickStartCard() {
   return (
     <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
-      <h3 className="text-sm font-semibold">Add PIR to your wallet in 5 minutes</h3>
+      <h3 className="text-sm font-semibold">Add PIR to your wallet in ten minutes</h3>
       <ol className="mt-3 space-y-1.5 text-sm text-zinc-700 dark:text-zinc-300">
         <li>
           <span className="mr-2 font-mono text-bitcoin">1.</span>

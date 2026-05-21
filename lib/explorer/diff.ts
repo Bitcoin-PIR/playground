@@ -20,8 +20,8 @@ import type { CapturedFrame } from './frame-tap';
 
 /**
  * Aggregated counters per (direction, opcode). Two queries with the same
- * wire shape produce equal `WireProfile` objects under
- * `wireProfilesEqual`.
+ * wire shape produce profiles that compare equal under
+ * `diffProfiles(...).identical`.
  */
 export interface WireProfile {
   /** Total bytes sent across the wire for this query. */

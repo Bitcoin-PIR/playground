@@ -25,7 +25,7 @@ export const DOCS_NAV: DocSection[] = [
     title: 'Get started',
     links: [
       { slug: '', title: 'Overview', summary: 'What Bitcoin PIR is, what the three surfaces do, where to go next.' },
-      { slug: 'quickstart', title: 'Quickstart', summary: 'Add PIR to a wallet in five minutes — DPF backend, copy-paste TypeScript.' },
+      { slug: 'quickstart', title: 'Quickstart', summary: 'Add PIR to a wallet in ten minutes — DPF backend, copy-paste TypeScript.' },
     ],
   },
   {

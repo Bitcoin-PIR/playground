@@ -20,25 +20,26 @@ nothing about which addresses are queried.
 ```text
                   ┌───────────────────────────┐
                   │ pir1 (Hetzner, no SEV)    │
-                  │   - hints                 │
+                  │   - HarmonyPIR hint srv   │
                   │   - DPF server 0          │
+                  │   - OnionPIR (single srv) │
                   └─────────────┬─────────────┘
                                 │
-                                │  no per-query traffic from
-                                │  HarmonyPIR clients
+                                │  hint pool + DPF + OnionPIR
+                                │  per-query traffic
                                 │
 ┌──────────┐                    │
 │  Wallet  │────────────────────┤
 └──────────┘                    │
-                                │  per-query traffic from
-                                │  DPF & HarmonyPIR & OnionPIR
+                                │  DPF + HarmonyPIR per-query
+                                │  traffic
                                 │
                   ┌─────────────▼─────────────┐
                   │ pir2 (VPSBG, SEV-SNP)     │
                   │   - DPF server 1          │
                   │   - HarmonyPIR query srv  │
-                  │   - OnionPIR              │
-                  │     (not in v17 — pir1)   │
+                  │   (no OnionPIR — runs     │
+                  │    on pir1 only)          │
                   └───────────────────────────┘
 ```
 

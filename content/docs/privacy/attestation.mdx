@@ -142,28 +142,39 @@ self-reported fields cannot be trusted.
 The reference operator publishes pins in
 [`web/src/attest-pin.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/attest-pin.ts).
 For wallets shipping with the reference deployment, bake those values
-into your bundle at build time. The expected values as of 2026-05-19
-(check the linked file for the latest):
+into your bundle at build time and resync whenever the operator
+redeploys (the values rotate per Nix-built binary). The expected
+values as of **2026-05-20 (Tier 3 UKI v18)**:
 
 ```ts
 // AMD Turin family ARK fingerprint — same across all Turin chips
 AMD_TURIN_ARK_FINGERPRINT_HEX =
   '1f084161a44bb6d93778a904877d4819cafa5d05ef4193b2ded9dd9c73dd3f6a';
 
-// pir2 (query server) — Tier 3 UKI v17, SEV-SNP
+// pir2 (query server) — Tier 3 UKI v18, SEV-SNP
 PIR2_TIER3_PIN = {
   measurementHex:
-    '6dcbfa45baa345ce5fabdddbc7386d43c31b3dbf1fd75402a112d303299c2428b2c0d0bf6a01325da87292ae69f2aa2a',
+    '53eb00331081ed7ee27df20a40c7d8d9be4c0a6a93cf043e876508a0f1fc74658987c03cceced379b5bf23e715a9435b',
   binarySha256Hex:
-    '3925cc4d5c4e45d8d3c8d798afb471905f909751d5c15ad5cccb22eb2631d2d5',
+    '2ba6e79c388f54867988885785512f42864d5ceb3b88d1e1d5b8d24459d2f46c',
 };
 
-// pir1 (hint server) — Hetzner i7-8700, no SEV (binary hash only)
+// pir1 (hint server) — Hetzner i7-8700, no SEV (binary hash only).
+// pir1 and pir2 currently run the SAME reproducibly-built binary,
+// so the `binarySha256Hex` matches across both pins.
 PIR1_PIN = {
   binarySha256Hex:
-    '3925cc4d5c4e45d8d3c8d798afb471905f909751d5c15ad5cccb22eb2631d2d5',
+    '2ba6e79c388f54867988885785512f42864d5ceb3b88d1e1d5b8d24459d2f46c',
 };
 ```
+
+<Callout kind="warn" title="These values rotate on every operator redeploy">
+A wallet baking these into its bundle will refuse to connect after
+the operator publishes a new Nix-built binary. Either resync from
+`vendor/bitcoinpir-web/attest-pin.ts` on every release, or fetch the
+current pins from a signed manifest you control. The playground
+itself reads from the vendored file, not from this doc.
+</Callout>
 
 Both servers run the same reproducible binary
 (`nix build .#unified-server`). `pir2` runs `--serve-queries` only

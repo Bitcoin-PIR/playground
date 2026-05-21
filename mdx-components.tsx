@@ -1,6 +1,5 @@
 import type { MDXComponents } from 'mdx/types';
 import Link from 'next/link';
-// added for /docs
 import { Callout } from '@/components/docs/Callout';
 import { Invariant } from '@/components/docs/Invariant';
 import { BackendMatrix } from '@/components/docs/BackendMatrix';
@@ -25,7 +24,7 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
     ),
     p: ({ children }) => <p className="my-4 leading-7">{children}</p>,
     a: ({ href, children }) => {
-      // added for /docs — Next-routed link for internal hrefs so client navigation works
+      // Next-routed link for internal hrefs so client navigation works.
       const internal = href && (href.startsWith('/') || href.startsWith('#'));
       const className =
         'text-bitcoin underline decoration-bitcoin/30 underline-offset-2 hover:decoration-bitcoin';
@@ -86,7 +85,6 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
       </pre>
     ),
     hr: () => <hr className="my-8 border-zinc-200 dark:border-zinc-800" />,
-    // added for /docs
     Callout,
     Invariant,
     BackendMatrix,

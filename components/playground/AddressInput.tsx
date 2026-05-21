@@ -3,13 +3,31 @@
 import { useMemo } from 'react';
 import { parseAddress, type ParsedAddress } from '@/lib/address';
 
+// Mainnet addresses spanning the four common script types plus a
+// known-empty entry, all verified via mempool.space to be in the
+// 1–16 UTXO range (well under the whale cutoff so they survive the
+// PIR database build). The originals (Block 9 + Genesis + a random
+// vanity P2WPKH) were all whales or unspendable by today's UTXO
+// counts and demoed the same "found" case three different ways.
 const EXAMPLES: { label: string; address: string }[] = [
-  // Satoshi block 9 (legacy P2PKH).
-  { label: 'Block 9 (P2PKH)', address: '12c6DSiU4Rq3P4ZxziKxzrL5LmMBrzjrJX' },
-  // Genesis block coinbase.
-  { label: 'Genesis (P2PKH)', address: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa' },
-  // Pizza-day recipient P2SH-ish modern example: a well-known P2WPKH.
-  { label: 'P2WPKH example', address: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq' },
+  // Recipient of the very first BTC transaction (Satoshi → Hal
+  // Finney, Jan 12 2009, block 170). ~4 UTXOs of tribute sends.
+  { label: 'Hal Finney (P2PKH)', address: '1Q2TWHE3GMdB6BZKafqwxXtWAWgFt5Jvm3' },
+  // The 10,000-BTC pizza recipient (Laszlo → Jeremy Sturdivant,
+  // May 22 2010). Original 10k spent long ago; ~13 tribute UTXOs.
+  { label: 'Pizza Day (P2PKH)', address: '17SkEw2md5avVNyYgj6RiXuQKNwkXaxFyQ' },
+  // Bitcoin.org's P2SH-wrapped donation address.
+  { label: 'Bitcoin.org (P2SH)', address: '3E8ociqZa9mZUSwGdSmAEMAoAxBK3FNDcd' },
+  // Bitcoin.org's native-segwit donation address (per their site).
+  { label: 'Bitcoin.org (P2WPKH)', address: 'bc1qp6ejw8ptj9l9pkscmlf8fhhkrrjeawgpyjvtq8' },
+  // The canonical "first Taproot output" address — first funded on
+  // BIP-341 activation day (Nov 14 2021, block 709635) and cited as
+  // the canonical bc1p example in nearly every Taproot tutorial.
+  { label: 'First Taproot (P2TR)', address: 'bc1p5d7rjq7g6rdk2yhzks9smlaqtedr4dekq08ge8ztwac72sfr9rusxg3297' },
+  // Locally-generated vanity P2WPKH (prefix reads "bc1qdem…"),
+  // verified zero on-chain and zero mempool activity — demonstrates
+  // the "verified absent" path.
+  { label: 'Empty (not found)', address: 'bc1qdemwhwmucrly8hywzwk5p8p8gvuel6vp9ddprt' },
 ];
 
 export function AddressInput({
@@ -47,7 +65,7 @@ export function AddressInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        placeholder="bc1q… / 1… / 3…"
+        placeholder="bc1q… / bc1p… / 1… / 3…"
         className={`block w-full rounded-md border bg-white px-3 py-2 font-mono text-sm shadow-sm transition focus:outline-none focus:ring-2 dark:bg-zinc-900 ${
           invalid
             ? 'border-red-500 focus:ring-red-500/30'

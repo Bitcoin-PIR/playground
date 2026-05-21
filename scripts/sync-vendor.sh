@@ -50,7 +50,7 @@ for f in \
   sdk-bridge.ts sync-controller.ts sync.ts sync-merge.ts \
   codec.ts hash.ts merkle.ts pbc.ts scan.ts ws.ts \
   server-info.ts protocol.ts leakage.ts attest-pin.ts \
-  types.ts harmony-types.ts harmonypir_hint_db.ts dpf.ts \
+  types.ts harmony-types.ts harmonypir_hint_db.ts \
   constants.ts polyfills.ts; do
   if [ -f "$WEB_SRC/$f" ]; then
     cp "$WEB_SRC/$f" "$WEB_DST/$f"

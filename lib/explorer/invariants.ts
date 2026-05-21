@@ -38,11 +38,7 @@
  */
 
 import type { CapturedFrame } from './frame-tap';
-import {
-  EXPECTED_K,
-  EXPECTED_K_CHUNK,
-  EXPECTED_INDEX_CUCKOO_NUM_HASHES,
-} from './frame-tap';
+import { EXPECTED_K, EXPECTED_K_CHUNK } from './frame-tap';
 
 // ─── Invariant result ───────────────────────────────────────────────────────
 

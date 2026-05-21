@@ -1,7 +1,5 @@
 'use client';
 
-import { useState } from 'react';
-
 export type Backend = 'dpf' | 'harmonypir' | 'onionpir';
 
 export const BACKENDS: { id: Backend; label: string; tagline: string }[] = [
