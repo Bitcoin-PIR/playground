@@ -1,19 +1,25 @@
-# The four privacy invariants
+# The five privacy invariants
 
 Bitcoin PIR's privacy claim is not "the server promises not to look".
 It's "an honest implementation of the protocol cannot leak certain
 properties, no matter what the server does, because the byte shape on
 the wire does not depend on them".
 
-This page states those properties precisely. Four invariants. Each
+This page states those properties precisely. Five invariants. Each
 has a one-line user-facing claim (what a wallet user gets) and a
 technical statement (the wire-shape property a maintainer must
 preserve).
 
 If you're auditing an SDK fork, deploying your own server, or just
 want to confirm what the wire actually carries, read this end to end.
-If you only want a yes/no answer for users, the four user-facing
+If you only want a yes/no answer for users, the five user-facing
 lines above each card are the answer.
+
+The numbering matches the
+[Wire explorer's Privacy Invariants panel](/explorer) and the
+`APPLICABLE` map in `lib/explorer/invariants.ts` — so when the
+explorer says "invariant 3 PASS" you can come here and read what
+that means.
 
 <Callout kind="note" title="Where this proof lives">
 These invariants are mechanized in EasyCrypt
@@ -33,27 +39,33 @@ your wallet and both servers. They know the protocol, the codebase,
 the database schema. They cannot break the underlying primitives
 (DPF privacy, FHE IND-CPA, PRP indistinguishability — these are
 cited from the primitives' papers). What can they still learn from
-the wire shape alone? The four invariants below close every leakage
+the wire shape alone? The five invariants below close every leakage
 axis the wire would otherwise expose.
 
 ---
 
 <Invariant
   index={1}
-  title="INDEX Merkle item-count symmetry"
-  userFacing="The server cannot tell whether your address is in its database, nor — for found addresses — which of two possible cuckoo positions it matched at."
-  technical="Every INDEX query emits exactly INDEX_CUCKOO_NUM_HASHES = 2 Merkle items, regardless of outcome (found at h=0, found at h=1, not-found, or whale). The per-Merkle-level sibling pass count is identical across all queries.">
+  title="Query padding (K=75 INDEX, K_CHUNK=80 CHUNK)"
+  userFacing="The server cannot tell how many real addresses are in your batch — every query, including a single-address sync, looks like a full K-padded batch on the wire."
+  technical="Every INDEX_BATCH frame carries exactly K = 75 per-group queries and every CHUNK_BATCH frame carries exactly K_CHUNK = 80 per-group queries. Real queries are placed via PBC, and the remaining slots are filled with random DPF keys (DPF/Harmony) or random ciphertexts (OnionPIR — padding lives inside the FHE payload). HarmonyPIR's per-batch frame carries the same group counts under the 0x43 wire layout (num_groups = K / K_CHUNK).">
 
-**Why this matters.** Cuckoo hashing places each scripthash into one
-of two bins. Pre-fix, an honest client would short-circuit on a found
-match and only emit one Merkle proof; a not-found client would emit
-two. The server reading the level-by-level pass count could
-distinguish them — and worse, distinguish *which* of the two
-positions a found query matched at. The fix is to always probe both
-positions and always emit two items.
+**Why this matters.** A naive client would send one DPF key per real
+address. The server could count the keys and learn the batch size
+exactly — and worse, learn when a user's wallet activity changes (a
+sync of 30 addresses vs a sync of 1 looks completely different on
+the wire). The fix is to always pad to K real-or-dummy slots so the
+per-frame byte and group counts are independent of how many real
+addresses the user is syncing.
 
-In the SDK this lives in `items_from_trace` inside each backend's
-client (`pir-sdk-client/src/{dpf,harmony,onion}.rs`).
+The K=75 / K_CHUNK=80 values are derived from the PBC analysis (see
+`pir-core/src/pbc.rs`): they're chosen so that a random batch of up
+to ~25 real addresses fits without overflow with high probability.
+
+For OnionPIR, the K-padding is embedded inside the FHE ciphertext —
+the wire frame is one ciphertext per probed bin, but the BFV payload
+itself has K = 75 worth of structure. See
+[OnionPIR protocol](/docs/protocol/onionpir).
 
 </Invariant>
 
@@ -77,22 +89,20 @@ and `web/src/onionpir_client.ts::queryBatch`).
 
 <Invariant
   index={3}
-  title="INDEX Merkle group-symmetry"
-  userFacing="The server cannot infer which addresses you queried by looking at how their Merkle proofs spread across server groups."
-  technical="INDEX Merkle items in a multi-query batch distribute across PBC groups via pbc_plan_rounds(derive_groups_3, K, 3, 500), not via derive_groups_3(scripthash, K)[0] directly. The wire-observable max_items_per_group_per_level is exactly 2, independent of the batch's collision pattern.">
+  title="INDEX Merkle item-count symmetry"
+  userFacing="The server cannot tell whether your address is in its database, nor — for found addresses — which of two possible cuckoo positions it matched at."
+  technical="Every INDEX query emits exactly INDEX_CUCKOO_NUM_HASHES = 2 Merkle items, regardless of outcome (found at h=0, found at h=1, not-found, or whale). The per-Merkle-level sibling pass count is identical across all queries.">
 
-**Why this matters.** Pre-fix, the SDK assigned each scripthash's
-INDEX Merkle items to its first candidate group
-(`derive_groups_3[...][0]`). Two scripthashes whose first candidate
-group collided would accumulate 4 Merkle items in that group — the
-wire-observable per-group pass count would jump from 2 to 4. That
-count is a function of the batch's collision pattern, and the
-collision pattern is a function of the scripthashes the user
-queried. The fix is to distribute via the PBC planner so the
-per-group count is content-independent.
+**Why this matters.** Cuckoo hashing places each scripthash into one
+of two bins. Pre-fix, an honest client would short-circuit on a found
+match and only emit one Merkle proof; a not-found client would emit
+two. The server reading the level-by-level pass count could
+distinguish them — and worse, distinguish *which* of the two
+positions a found query matched at. The fix is to always probe both
+positions and always emit two items.
 
-In the SDK this lives in `query_index_phase_batched` (DPF and Harmony)
-and the gid-level PBC plan inside the OnionPIR client.
+In the SDK this lives in `items_from_trace` inside each backend's
+client (`pir-sdk-client/src/{dpf,harmony,onion}.rs`).
 
 </Invariant>
 
@@ -113,6 +123,32 @@ fixed-count pad with XOR-cancellation: every request is exactly
 
 In the SDK this lives in `HarmonyGroup::build_request` and
 `build_synthetic_dummy` ([`harmonypir-wasm/src/lib.rs`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/harmonypir-wasm)).
+
+</Invariant>
+
+<Invariant
+  index={5}
+  title="INDEX Merkle group-symmetry (PBC plan)"
+  userFacing="The server cannot infer which addresses you queried by looking at how their Merkle proofs spread across server groups."
+  technical="INDEX Merkle items in a multi-query batch distribute across PBC groups via pbc_plan_rounds(derive_groups_3, K, 3, 500), not via derive_groups_3(scripthash, K)[0] directly. The wire-observable max_items_per_group_per_level is exactly 2, independent of the batch's collision pattern.">
+
+**Why this matters.** Pre-fix, the SDK assigned each scripthash's
+INDEX Merkle items to its first candidate group
+(`derive_groups_3[...][0]`). Two scripthashes whose first candidate
+group collided would accumulate 4 Merkle items in that group — the
+wire-observable per-group pass count would jump from 2 to 4. That
+count is a function of the batch's collision pattern, and the
+collision pattern is a function of the scripthashes the user
+queried. The fix is to distribute via the PBC planner so the
+per-group count is content-independent.
+
+In the SDK this lives in `query_index_phase_batched` (DPF and Harmony)
+and the gid-level PBC plan inside the OnionPIR client.
+
+This invariant only applies to multi-query batches: a single-query
+trace has no collision pattern to leak. The
+[Wire explorer](/explorer) will report `n/a` on single-address runs
+and `pass` once you sync ≥2 addresses in one batch.
 
 </Invariant>
 

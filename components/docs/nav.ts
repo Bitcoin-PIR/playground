@@ -54,7 +54,7 @@ export const DOCS_NAV: DocSection[] = [
   {
     title: 'Privacy',
     links: [
-      { slug: 'privacy/invariants', title: 'The four invariants', summary: 'What the wire reveals, what it does not. K=75, K_CHUNK=80, two cuckoo probes, group-symmetric placement.' },
+      { slug: 'privacy/invariants', title: 'The five invariants', summary: 'What the wire reveals, what it does not. K=75/K_CHUNK=80 padding, CHUNK round-presence, INDEX Merkle item-count = 2, HarmonyPIR T−1 request-count, INDEX Merkle group-symmetry.' },
       { slug: 'privacy/attestation', title: 'Attestation', summary: 'Verifying the SEV-SNP report and the operator-pinned MEASUREMENT.' },
     ],
   },

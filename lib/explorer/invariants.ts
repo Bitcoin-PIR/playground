@@ -2,7 +2,9 @@
  * Privacy-invariant checks against captured wire traffic.
  *
  * Cross-reference with the main repo's CLAUDE.md "CRITICAL SECURITY
- * REQUIREMENTS" section. The four invariants checked here:
+ * REQUIREMENTS" section and `content/docs/privacy/invariants.mdx`.
+ * The five invariants checked here (numbering matches CLAUDE.md and
+ * the docs page):
  *
  * 1. Query padding (K=75 INDEX, K_CHUNK=80 CHUNK).
  *    Every INDEX_BATCH request frame MUST carry count=75; every
@@ -28,8 +30,7 @@
  *    request length (the "fixed-count invariant"). When this is
  *    uniform, T is consistent and the per-group count doesn't drift.
  *
- * Plus:
- * 5. INDEX Merkle Group-Symmetry.
+ * 5. INDEX Merkle Group-Symmetry (PBC plan).
  *    For a multi-query batch, the per-Merkle-level pass count should
  *    stay at 2 × n_servers (one PBC round) when N ≤ K, regardless of
  *    whether the queries' first-derived-group collide. We can't easily

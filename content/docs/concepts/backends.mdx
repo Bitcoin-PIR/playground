@@ -114,13 +114,14 @@ provider, or a corporate network with restrictive egress.
 This is the important bit. The three backends expose nearly identical
 SDK surfaces (`sync(scriptHashes, lastHeight)` returns the same
 `WasmSyncResult` shape) and share the same **wire-shape privacy
-invariants** — the [four invariants](/docs/privacy/invariants) hold
+invariants** — the [five invariants](/docs/privacy/invariants) hold
 for all three:
 
-- K=75 INDEX-group padding, K_CHUNK=80 CHUNK-group padding.
-- Two INDEX Merkle items per query, every query.
-- A CHUNK PIR round always follows an INDEX query.
-- PBC group-symmetric Merkle placement.
+- K=75 INDEX-group padding, K_CHUNK=80 CHUNK-group padding (#1).
+- A CHUNK PIR round always follows an INDEX query (#2).
+- Two INDEX Merkle items per query, every query (#3).
+- HarmonyPIR per-group request-count = T − 1, regardless of state (#4 — HarmonyPIR only).
+- PBC group-symmetric Merkle placement across multi-query batches (#5).
 
 A wallet switching backends doesn't need to rewrite its query layer.
 The decision is operational (which servers can you deploy?) and

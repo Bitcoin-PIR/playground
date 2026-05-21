@@ -98,7 +98,7 @@ sibling-batch requests all share a `BatchQuery` payload:
 
 - `count` is the number of PBC groups in the batch. For INDEX it's
   always K = 75. For CHUNK it's always K_CHUNK = 80. These are
-  **fixed** — see [the four invariants](/docs/privacy/invariants).
+  **fixed** — see [the five invariants](/docs/privacy/invariants).
 - `keys_per_group` is the number of DPF keys per group. Index level
   is 2, chunk level is 3 (one per cuckoo position within the bin).
 - The per-group keys are concatenated in order.

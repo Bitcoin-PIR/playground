@@ -148,7 +148,7 @@ returns opaque `WasmQueryResult` handles with the inspector fields
 populated (`indexBins`, `chunkBins`, `matchedIndexIdx`). Per-query
 Merkle verification is **skipped** so you can persist or inspect the
 results and verify later. Both paths preserve the
-[four invariants](/docs/privacy/invariants).
+[five invariants](/docs/privacy/invariants).
 
 `verifyMerkleBatch` is the verifier half. Pass the JSON-serialised
 `WasmQueryResult.toJson()` array (or `null` for slots you don't care

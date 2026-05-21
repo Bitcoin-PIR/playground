@@ -20,7 +20,7 @@ export default function Home() {
         <Card
           href="/explorer"
           title="Wire explorer"
-          body="Inspect every WebSocket frame and verify the four privacy invariants hold on your traffic."
+          body="Inspect every WebSocket frame and verify the five privacy invariants hold on your traffic."
         />
         <Card
           href="/docs"
