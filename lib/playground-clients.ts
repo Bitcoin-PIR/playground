@@ -222,9 +222,8 @@ function translateWasmEntries(wqr: {
   entryCount: number;
   totalBalance: bigint;
   isWhale: boolean;
-  merkleVerified: boolean;
   getEntry(i: number): { txid: string; vout: number; amountSats?: number; amount?: number } | null | undefined;
-}): { utxos: PlaygroundUtxo[]; totalSats: bigint; isWhale: boolean; merkleVerified: boolean } {
+}): { utxos: PlaygroundUtxo[]; totalSats: bigint; isWhale: boolean } {
   const utxos: PlaygroundUtxo[] = [];
   for (let i = 0; i < wqr.entryCount; i++) {
     const e = wqr.getEntry(i);
@@ -242,7 +241,6 @@ function translateWasmEntries(wqr: {
     utxos,
     totalSats: wqr.totalBalance,
     isWhale: wqr.isWhale,
-    merkleVerified: wqr.merkleVerified,
   };
 }
 
@@ -283,13 +281,22 @@ export async function runDpfQuery(
 
     const qStart = performance.now();
     const wqrs = (await client.queryBatchRaw(packed, 0)) as any[];
-    const qElapsed = performance.now() - qStart;
 
     if (wqrs.length !== 1) {
       throw new Error(`Expected 1 result, got ${wqrs.length}`);
     }
     const wqr = wqrs[0];
-    const { utxos, totalSats, isWhale, merkleVerified } = translateWasmEntries(wqr);
+    // queryBatchRaw is the inspector path — Merkle is skipped. Drive a
+    // real verification round through `verifyMerkleBatch` so the result
+    // panel reflects an actual verdict, not the default-true placeholder.
+    const jsonArr = wqrs.map((w: any) => w.toJson());
+    const merkleVerified = await runMerkleBatch(
+      () => (client as any).verifyMerkleBatch(jsonArr, 0),
+      notes,
+    );
+    const qElapsed = performance.now() - qStart;
+
+    const { utxos, totalSats, isWhale } = translateWasmEntries(wqr);
     if (typeof wqr.free === 'function') wqr.free();
 
     return {
@@ -340,13 +347,20 @@ export async function runHarmonyQuery(
 
     const qStart = performance.now();
     const wqrs = (await client.queryBatchRaw(packed, 0)) as any[];
-    const qElapsed = performance.now() - qStart;
 
     if (wqrs.length !== 1) {
       throw new Error(`Expected 1 result, got ${wqrs.length}`);
     }
     const wqr = wqrs[0];
-    const { utxos, totalSats, isWhale, merkleVerified } = translateWasmEntries(wqr);
+    // Same inspector-path caveat as DPF — drive a real Merkle round.
+    const jsonArr = wqrs.map((w: any) => w.toJson());
+    const merkleVerified = await runMerkleBatch(
+      () => (client as any).verifyMerkleBatch(jsonArr, 0),
+      notes,
+    );
+    const qElapsed = performance.now() - qStart;
+
+    const { utxos, totalSats, isWhale } = translateWasmEntries(wqr);
     if (typeof wqr.free === 'function') wqr.free();
 
     notes.push(
@@ -433,12 +447,21 @@ export async function runOnionPirQuery(
 
     const qStart = performance.now();
     const results = await client.queryBatch([scriptHash], undefined, 0);
+    // queryBatch leaves merkleVerified undefined — drive the actual
+    // per-bin Merkle proof rounds through `verifyMerkleBatch`. The
+    // OnionPIR client also propagates the verdict back into each
+    // result, but we use the returned boolean[] directly so an empty
+    // tree branch (no leaves) doesn't silently look "verified".
+    const merkleVerified = await runMerkleBatch(
+      () => client.verifyMerkleBatch(results.filter((r): r is NonNullable<typeof r> => !!r)),
+      notes,
+    );
     const qElapsed = performance.now() - qStart;
 
     const out = translateLegacyResult(results[0]);
 
     notes.push(
-      'OnionPIR is a single-server FHE backend. SEAL doesn’t compile to wasm32, so this client is hand-rolled TypeScript.',
+      'OnionPIR is a single-server FHE backend. SEAL doesn’t compile to wasm32 (the BFV core math runs in a separate hand-rolled WASM module).',
     );
 
     return {
@@ -450,7 +473,7 @@ export async function runOnionPirQuery(
       utxos: out.utxos,
       totalSats: out.totalSats,
       isWhale: out.isWhale,
-      merkleVerified: out.merkleVerified,
+      merkleVerified,
       attestation,
       notes,
     };
@@ -465,10 +488,9 @@ function translateLegacyResult(r: QueryResult | null | undefined): {
   utxos: PlaygroundUtxo[];
   totalSats: bigint;
   isWhale: boolean;
-  merkleVerified: boolean;
 } {
   if (!r) {
-    return { utxos: [], totalSats: 0n, isWhale: false, merkleVerified: true };
+    return { utxos: [], totalSats: 0n, isWhale: false };
   }
   const utxos: PlaygroundUtxo[] = (r.entries ?? []).map((e: UtxoEntry) => ({
     // Legacy entries hold raw 32B internal-order TXID — reverse for display.
@@ -480,8 +502,30 @@ function translateLegacyResult(r: QueryResult | null | undefined): {
     utxos,
     totalSats: r.totalSats ?? 0n,
     isWhale: !!r.isWhale,
-    merkleVerified: r.merkleVerified !== false,
   };
+}
+
+/**
+ * Drive a per-result Merkle verification batch and reduce it to a single
+ * trust verdict for the playground (we only run single-scripthash batches
+ * here). Any throw is treated as untrusted — the proof either passed or
+ * we couldn't prove it, never "skipped looks fine".
+ */
+async function runMerkleBatch(
+  call: () => Promise<unknown>,
+  notes: string[],
+): Promise<boolean> {
+  try {
+    const verdicts = (await call()) as boolean[];
+    if (!Array.isArray(verdicts) || verdicts.length === 0) {
+      notes.push('Merkle verification returned no verdicts — treating as untrusted.');
+      return false;
+    }
+    return verdicts.every(Boolean);
+  } catch (e) {
+    notes.push(`Merkle verification errored — treating as untrusted: ${(e as Error)?.message ?? e}`);
+    return false;
+  }
 }
 
 function reverseBytesHex(bytes: Uint8Array): string {

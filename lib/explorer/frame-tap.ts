@@ -386,6 +386,17 @@ export class FrameTap {
     } as unknown as typeof WebSocket;
     // Preserve `instanceof WebSocket` checks.
     Patched.prototype = Original.prototype;
+    // Mirror the static readyState constants. Without this, JS callers
+    // that branch on `WebSocket.OPEN` etc. (e.g. the hand-rolled
+    // `ManagedWebSocket.sendRaw` in `vendor/bitcoinpir-web/ws.ts`) see
+    // `undefined` and falsely conclude the socket is closed. The
+    // wasm-bindgen DPF/Harmony clients have their own readyState
+    // plumbing so they were not affected, which made the OnionPIR-
+    // only explorer regression look like a server-side close.
+    (Patched as any).CONNECTING = (Original as any).CONNECTING;
+    (Patched as any).OPEN = (Original as any).OPEN;
+    (Patched as any).CLOSING = (Original as any).CLOSING;
+    (Patched as any).CLOSED = (Original as any).CLOSED;
 
     this.patchedClass = Patched;
     window.WebSocket = Patched;

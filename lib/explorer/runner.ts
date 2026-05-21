@@ -148,7 +148,7 @@ async function runHarmony(tap: FrameTap, sh: Uint8Array): Promise<QueryRun> {
   }
 }
 
-// ─── OnionPIR runner (stub — see header) ─────────────────────────────────────
+// ─── OnionPIR runner ─────────────────────────────────────────────────────────
 
 async function runOnion(tap: FrameTap, sh: Uint8Array): Promise<QueryRun> {
   // OnionPIR uses the hand-rolled TS client (SEAL doesn't compile to

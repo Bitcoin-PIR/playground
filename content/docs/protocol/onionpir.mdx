@@ -10,13 +10,18 @@ client decrypts.
 For the framing envelope shared across all backends see
 [Wire format](/docs/protocol/wire-format).
 
-<Callout kind="warn" title="No WASM client">
-OnionPIR depends on Microsoft SEAL (C++), which does not compile to
-`wasm32-unknown-unknown`. The browser SDK
-([`pir-sdk-wasm`](/docs/sdk/typescript)) does not include
+<Callout kind="warn" title="Not in `pir-sdk-wasm`">
+Microsoft SEAL (C++) does not compile to `wasm32-unknown-unknown`, so
+the unified browser SDK
+([`pir-sdk-wasm`](/docs/sdk/typescript)) does not ship a
 `WasmOnionClient`. The reference web app uses a hand-rolled
 TypeScript port of the protocol —
-[`web/src/onionpir_client.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/onionpir_client.ts).
+[`web/src/onionpir_client.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/onionpir_client.ts)
+— which drives a separate hand-rolled WASM module
+(`/wasm/onionpir_client.{mjs,wasm}`) for the BFV core math. The
+playground installs that module at load time via the documented
+`globalThis.__onionpirWasmFactory` hook.
+
 Native Rust callers can use `pir-sdk-client::onion::OnionClient`
 behind the `onion` cargo feature.
 </Callout>

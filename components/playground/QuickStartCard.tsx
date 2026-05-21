@@ -26,7 +26,7 @@ export function QuickStartCard() {
         <Link href="/docs/quickstart" className="text-bitcoin hover:underline">
           full quickstart →
         </Link>
-        <Link href="/docs/privacy" className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+        <Link href="/docs/privacy/invariants" className="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
           privacy invariants
         </Link>
       </div>
