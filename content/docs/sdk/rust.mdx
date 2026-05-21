@@ -93,8 +93,14 @@ async fn main() -> anyhow::Result<()> {
     let result = client.sync(&script_hashes, None).await?;
     for (i, r) in result.results.iter().enumerate() {
         match r {
-            Some(qr) => println!("{i}: {} UTXO(s), {} sats, merkle={}",
-                qr.entries.len(), qr.total_balance, qr.merkle_verified),
+            // SOUNDNESS: `sync()` runs Merkle verification inline, but
+            // the caller MUST refuse a slot whose proof failed. Skipping
+            // this guard would let a malicious server inject UTXOs.
+            Some(qr) if !qr.merkle_verified => {
+                eprintln!("{i}: Merkle FAILED — refusing to display");
+            }
+            Some(qr) => println!("{i}: {} UTXO(s), {} sats",
+                qr.entries.len(), qr.total_balance),
             None => println!("{i}: not found"),
         }
     }

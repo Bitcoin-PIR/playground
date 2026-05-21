@@ -88,6 +88,10 @@ async function runDpf(tap: FrameTap, sh: Uint8Array): Promise<QueryRun> {
     // observable in the explorer, we leave the channel in cleartext.
     await client.connect();
     await client.fetchCatalog();
+    // `queryBatch` (not `queryBatchRaw`) verifies Merkle internally on the
+    // wasm-bindgen DPF/Harmony clients — the returned `merkleVerified` is
+    // a real verdict, not the default-true placeholder. (OnionPIR's
+    // hand-rolled `queryBatch` does NOT — see runOnion below.)
     const results = await client.queryBatch(packOne(sh), 0);
     const found = Array.isArray(results) && results.length > 0 && results[0] !== null;
     let outcome: string;
@@ -127,6 +131,7 @@ async function runHarmony(tap: FrameTap, sh: Uint8Array): Promise<QueryRun> {
       // — the next queryBatch will surface a real error if hints are
       // truly missing.
     }
+    // Same Merkle-verifies-inline note as DPF above.
     const results = await client.queryBatch(packOne(sh), 0);
     const found = Array.isArray(results) && results.length > 0 && results[0] !== null;
     let outcome: string;
@@ -163,12 +168,41 @@ async function runOnion(tap: FrameTap, sh: Uint8Array): Promise<QueryRun> {
     await client.connect();
     const results = await client.queryBatch([sh], undefined, 0);
     const found = Array.isArray(results) && results.length > 0 && !!results[0];
+
+    // SOUNDNESS: `OnionPirWebClient.queryBatch` does NOT verify Merkle on
+    // its own — `merkleVerified` is left undefined. Drive the per-bin
+    // FHE sibling rounds via `verifyMerkleBatch` so the explorer wire
+    // capture also includes the Merkle traffic and the displayed outcome
+    // reflects a real verdict. (Identical pattern to
+    // `lib/playground-clients.ts::runOnionPirQuery`.)
+    const nonNull = results.filter(
+      (r): r is NonNullable<typeof r> => !!r,
+    );
+    let merkleVerdict: 'pass' | 'fail' | 'n/a' = 'n/a';
+    if (nonNull.length > 0) {
+      try {
+        const verdicts = await client.verifyMerkleBatch(nonNull);
+        merkleVerdict =
+          verdicts.length > 0 && verdicts.every(Boolean) ? 'pass' : 'fail';
+      } catch {
+        merkleVerdict = 'fail';
+      }
+    }
+
+    const baseOutcome = found
+      ? `OnionPIR query completed — entry found`
+      : `OnionPIR query completed — entry not found`;
+    const outcome =
+      merkleVerdict === 'fail'
+        ? `${baseOutcome} — Merkle verification FAILED, do not trust`
+        : merkleVerdict === 'pass'
+          ? `${baseOutcome} — Merkle verified`
+          : baseOutcome;
     return {
       frames: tap.snapshot(),
-      outcome: found
-        ? `OnionPIR query completed — entry found`
-        : `OnionPIR query completed — entry not found`,
+      outcome,
       found,
+      error: merkleVerdict === 'fail' ? 'Merkle verification failed' : undefined,
     };
   } finally {
     try {

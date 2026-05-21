@@ -104,10 +104,16 @@ for (let i = 0; i < sync.resultCount; i++) {
     console.log(`${i}: not found (verified absent)`);
     continue;
   }
+  // SOUNDNESS: `merkleVerified === false` means a per-bucket proof
+  // failed and the server's response cannot be trusted. Skip the slot
+  // (and surface the failure to the user); never display the entries.
+  if (!result.merkleVerified) {
+    console.warn(`${i}: Merkle FAILED — refusing to display untrusted UTXOs`);
+    continue;
+  }
   console.log(
     `${i}: ${result.entryCount} UTXO(s), ` +
-    `balance ${result.totalBalance} sat, ` +
-    `merkle verified=${result.merkleVerified}`,
+    `balance ${result.totalBalance} sat`,
   );
   for (let j = 0; j < result.entryCount; j++) {
     console.log('  ', result.getEntry(j));

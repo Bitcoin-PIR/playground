@@ -101,7 +101,15 @@ const sync = await client.sync(packed, lastHeight);
 for (let i = 0; i < sync.resultCount; i++) {
   const r = sync.getResult(i);
   if (!r) continue;
-  console.log(r.entryCount, r.totalBalance, r.merkleVerified);
+  // SOUNDNESS: always guard on `merkleVerified` — `sync()` runs the
+  // verifier inline, but it is the caller's job to refuse a slot
+  // whose proof failed. Displaying entries from an unverified slot
+  // would defeat the integrity half of PIR's guarantee.
+  if (!r.merkleVerified) {
+    console.warn(`slot ${i}: Merkle FAILED — skipping`);
+    continue;
+  }
+  console.log(r.entryCount, r.totalBalance);
 }
 
 console.log('synced height:', sync.syncedHeight);

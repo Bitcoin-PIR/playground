@@ -158,6 +158,16 @@ too. The relevant code paths are:
   per-group Merkle layer with ARITY=120; the per-group placement is
   structurally trivial regardless of input.
 
+<Callout kind="warn" title="OnionPIR queryBatch does NOT verify Merkle">
+Unlike the WASM `WasmDpfClient.queryBatch` / `WasmHarmonyClient.queryBatch`
+which run the Merkle verifier inline, the standalone-TS
+`OnionPirWebClient.queryBatch` returns results with `merkleVerified`
+**undefined**. The caller MUST follow with `client.verifyMerkleBatch(results)`
+(filtered to non-null entries) and refuse any slot whose verdict is
+`false`. See `lib/playground-clients.ts::runOnionPirQuery` for the
+exact pattern the playground uses.
+</Callout>
+
 ## Implementation reference
 
 - Standalone TS: [`web/src/onionpir_client.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/onionpir_client.ts)

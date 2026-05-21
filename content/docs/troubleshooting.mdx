@@ -102,6 +102,9 @@ Or catch the error and refresh on demand:
 
 ```ts
 try {
+  // `sync()` runs Merkle verification inline; the caller still MUST
+  // guard on `result.merkleVerified` for each returned slot before
+  // displaying entries — see Quickstart for the guard pattern.
   await client.sync(packed, lastHeight);
 } catch (e) {
   if (`${e}`.includes('hints exhausted')) {
