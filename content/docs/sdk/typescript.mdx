@@ -126,18 +126,54 @@ a `type` field discriminating `"step_start"`, `"step_progress"`,
 ```ts
 client.queryBatch(scriptHashes: Uint8Array, dbId: number): Promise<any>
 client.queryBatchRaw(scriptHashes: Uint8Array, dbId: number): Promise<any>
+client.verifyMerkleBatch(resultsJson: any, dbId: number): Promise<boolean[]>
 ```
 
 `queryBatch` runs one database lookup without the catalog or sync-plan
 orchestration. Returns a JSON array of length N. Each slot is either
-`null` (not found) or a `QueryResult` JSON object.
+`null` (not found) or a `QueryResult` JSON object. Per-query Merkle
+verification runs inline — the returned `merkleVerified` field is a
+real verdict.
 
 `queryBatchRaw` is the **split-verify** path — same wire shape, but
 returns opaque `WasmQueryResult` handles with the inspector fields
 populated (`indexBins`, `chunkBins`, `matchedIndexIdx`). Per-query
-Merkle verification is **skipped** so you can persist results and
-verify later via `verifyMerkleBatch`. Both paths preserve the
+Merkle verification is **skipped** so you can persist or inspect the
+results and verify later. Both paths preserve the
 [four invariants](/docs/privacy/invariants).
+
+`verifyMerkleBatch` is the verifier half. Pass the JSON-serialised
+`WasmQueryResult.toJson()` array (or `null` for slots you don't care
+about) and the `dbId` you originally queried. Returns one boolean per
+input slot — `true` = proof passed (or the DB doesn't publish Merkle
+commitments), `false` = at least one Merkle proof FAILED; treat the
+slot as untrusted.
+
+<Callout kind="warn" title="If you use queryBatchRaw, always pair it with verifyMerkleBatch">
+Skipping the verifier defeats the integrity half of PIR's
+privacy + integrity contract. A malicious server can serve any UTXO
+list it wants; the Merkle proof is what lets the wallet refuse the
+forgery. The high-level `sync()` and `queryBatch()` calls do this
+for you; `queryBatchRaw()` does not.
+</Callout>
+
+```ts
+// Correct queryBatchRaw + verifyMerkleBatch pairing.
+// Same pattern as `lib/playground-clients.ts::runDpfQuery` on the
+// playground page — copy from there if you need a turnkey example.
+const wqrs = await client.queryBatchRaw(scriptHashes, 0);
+
+const jsonArr = wqrs.map((w) => w.toJson());
+const verdicts = await client.verifyMerkleBatch(jsonArr, 0);
+if (verdicts.length === 0 || !verdicts.every(Boolean)) {
+  throw new Error('Merkle proof FAILED — untrusted result');
+}
+
+// Only now is it safe to read the per-result data.
+for (const wqr of wqrs) {
+  console.log(wqr.totalBalance, wqr.entryCount);
+}
+```
 
 ### Attestation + encrypted channel
 
