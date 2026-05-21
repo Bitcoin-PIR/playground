@@ -54,9 +54,22 @@ const spkHex = addressToScriptPubKey('__ADDRESS__')!;
 const sh = scriptHash(hexToBytes(spkHex));  // 20 bytes
 
 // Query. Batch up to 8-16 addresses at once for amortised cost.
+// queryBatchRaw is the inspector path: it returns the bin payloads
+// needed to verify the per-bucket Merkle proof but does NOT run the
+// verifier itself — that's a separate call below. Always pair them.
 const packed = sh;  // for a single query
-const [result] = await client.queryBatchRaw(packed, 0);
+const wqrs = await client.queryBatchRaw(packed, 0);
 
+// SOUNDNESS: verify the per-bucket Merkle proof before trusting any
+// result. A failing verdict means the data is inconsistent with the
+// pinned tree-top commitment — refuse to use it.
+const jsonArr = wqrs.map((w) => w.toJson());
+const verdicts = await client.verifyMerkleBatch(jsonArr, 0);
+if (verdicts.length === 0 || !verdicts.every(Boolean)) {
+  throw new Error('Merkle proof FAILED — untrusted result');
+}
+
+const [result] = wqrs;
 console.log('balance (sats):', result.totalBalance);
 for (let i = 0; i < result.entryCount; i++) {
   const u = result.getEntry(i);
@@ -100,8 +113,21 @@ await client.fetchHintsWithProgress(
 
 const spkHex = addressToScriptPubKey('__ADDRESS__')!;
 const sh = scriptHash(hexToBytes(spkHex));
-const [result] = await client.queryBatchRaw(sh, 0);
+// queryBatchRaw is the inspector path: it returns the bin payloads
+// needed to verify the per-bucket Merkle proof but does NOT run the
+// verifier itself — that's a separate call below. Always pair them.
+const wqrs = await client.queryBatchRaw(sh, 0);
 
+// SOUNDNESS: verify the per-bucket Merkle proof before trusting any
+// result. A failing verdict means the data is inconsistent with the
+// pinned tree-top commitment — refuse to use it.
+const jsonArr = wqrs.map((w) => w.toJson());
+const verdicts = await client.verifyMerkleBatch(jsonArr, 0);
+if (verdicts.length === 0 || !verdicts.every(Boolean)) {
+  throw new Error('Merkle proof FAILED — untrusted result');
+}
+
+const [result] = wqrs;
 console.log('balance (sats):', result.totalBalance);
 for (let i = 0; i < result.entryCount; i++) {
   const u = result.getEntry(i);
@@ -127,8 +153,21 @@ await client.connect();
 const spkHex = addressToScriptPubKey('__ADDRESS__')!;
 const sh = scriptHash(hexToBytes(spkHex));
 
-const [result] = await client.queryBatch([sh]);
+const results = await client.queryBatch([sh]);
 
+// SOUNDNESS: OnionPIR's queryBatch does NOT verify the per-bin
+// Merkle proof on its own — you must call verifyMerkleBatch
+// explicitly. A failing verdict means the data is inconsistent with
+// the pinned super-root; refuse to use it.
+const nonNull = results.filter((r): r is NonNullable<typeof r> => !!r);
+if (nonNull.length > 0) {
+  const verdicts = await client.verifyMerkleBatch(nonNull);
+  if (!verdicts.every(Boolean)) {
+    throw new Error('Merkle proof FAILED — untrusted result');
+  }
+}
+
+const [result] = results;
 if (!result) {
   console.log('no UTXOs');
 } else {
