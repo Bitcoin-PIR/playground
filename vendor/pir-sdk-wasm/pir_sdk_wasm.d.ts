@@ -270,6 +270,91 @@ export function PRP_FASTPRP(): number;
 export function PRP_HMR12(): number;
 
 /**
+ * JS-visible result of a `WasmDpfClient.announce()` (or
+ * `WasmHarmonyClient.announce()`) call.
+ *
+ * Carries the parsed operator-signed bundle:
+ * - `IdentityCert` (Tier 1): operator's offline Ed25519 key endorses
+ *   the server's identity_pubkey for a given server_id + validity
+ *   window.
+ * - `ChannelManifest` (Tier 2): server's per-boot Ed25519 key signs
+ *   the current channel_pub + build metadata.
+ *
+ * `chainVerified` tells you whether the two layers cross-check
+ * (manifest signature + identity_pubkey + server_id agreement).
+ * Pinning the operator pubkey is a separate, caller-driven step:
+ * compare `operatorPubkeyHex` against your pinned value, then call
+ * the IdentityCert's verify yourself if you want defense-in-depth on
+ * top of `chainVerified` — but `chainVerified` already runs the
+ * manifest signature check internally.
+ */
+export class WasmAnnounceVerification {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Hex-encoded binary SHA-256 the manifest claims (self-reported,
+     * trustworthy iff the chain check passed).
+     */
+    readonly binarySha256Hex: string;
+    /**
+     * Diagnostic string describing why `chainVerified` is false.
+     * Empty when verified.
+     */
+    readonly chainError: string;
+    /**
+     * Whether the in-bundle chain check passed: manifest signature
+     * valid against `identityPubkey`, and `cert.server_id` ==
+     * `manifest.server_id`, and `cert.identity_pubkey` ==
+     * `manifest.identity_pubkey`. Does NOT include cert-vs-pinned-
+     * operator verification (caller-driven).
+     */
+    readonly chainVerified: boolean;
+    /**
+     * X25519 channel pubkey the manifest endorses. Cross-check
+     * against the value you'll handshake with (e.g.
+     * `attestVerification.serverStaticPub`). Returns the raw 32 bytes.
+     */
+    readonly channelPub: Uint8Array;
+    /**
+     * Same data as [`Self::channel_pub`] but hex-encoded for display.
+     */
+    readonly channelPubHex: string;
+    /**
+     * Server-self-reported git rev (string).
+     */
+    readonly gitRev: string;
+    /**
+     * Hex-encoded identity pubkey the operator endorsed for this
+     * server. The Tier-2 manifest signature chains back to this key.
+     */
+    readonly identityPubkeyHex: string;
+    /**
+     * Manifest's `issued_at` timestamp (unix-seconds). Use this to
+     * apply a freshness policy if you want one.
+     */
+    readonly issuedAt: bigint;
+    /**
+     * Hex-encoded operator pubkey (the Tier-1 signer). Compare this
+     * against the value the operator published out-of-band (e.g. via
+     * Nostr) before trusting any of the bundle's fields.
+     */
+    readonly operatorPubkeyHex: string;
+    /**
+     * Server identifier the cert was endorsed for (e.g. "pir1").
+     */
+    readonly serverId: string;
+    /**
+     * Cert validity lower bound (unix-seconds). 0 = no lower bound.
+     */
+    readonly validFrom: bigint;
+    /**
+     * Cert validity upper bound (unix-seconds). 0 = indefinite.
+     */
+    readonly validUntil: bigint;
+}
+
+/**
  * Opaque handle wrapping an ARC `PresentationState` + `Credential`.
  *
  * The credential is obtained from the payment service as a byte blob
@@ -416,6 +501,28 @@ export class WasmAttestVerification {
     private constructor();
     free(): void;
     [Symbol.dispose](): void;
+    /**
+     * Highest-level SEV-SNP check: runs `verifyVcekChain`'s four
+     * steps AND the policy assertions described below — in a single
+     * call. On success, the report is fully trustworthy
+     * (signature-anchored AND content-acceptable).
+     *
+     * `expectedArkFingerprint`: same as `verifyVcekChain`. Pass the
+     * `AMD_TURIN_ARK_FINGERPRINT` constant from `attest-pin.ts` for
+     * production.
+     *
+     * `policy` is a `WasmPolicyRequirements` (constructed via its
+     * JS-visible constructor + setters). Defaults to the strictest
+     * production policy: VMPL 0, no debug, no migration, TCB
+     * monotonic. Override individual fields for tests / non-strict
+     * deployments.
+     *
+     * Throws a single-line JsError on the FIRST failing step (chain
+     * → report sig → policy). Use `verifyVcekChain` directly if you
+     * want to surface the chain / sig failure separately from a
+     * policy failure.
+     */
+    verifyFull(expected_ark_fingerprint: Uint8Array | null | undefined, policy: WasmPolicyRequirements): void;
     /**
      * One-shot AMD VCEK chain validation. Verifies:
      *   1. The ARK PEM's SHA-256 fingerprint matches
@@ -664,20 +771,39 @@ export class WasmDpfClient {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Send REQ_ANNOUNCE to one of the connected servers and return a
+     * [`WasmAnnounceVerification`] with the parsed operator-signed
+     * identity bundle.
+     *
+     * Errors with the server's RESP_ERROR text ("announce not
+     * configured") if the server doesn't have an identity key + cert
+     * installed. That's a soft state — attest / handshake / queries
+     * still work as normal.
+     */
+    announce(server_index: number): Promise<WasmAnnounceVerification>;
+    /**
      * Send REQ_ATTEST to one of the connected servers and return a
      * [`WasmAttestVerification`] handle covering the response.
      *
-     * `serverIndex` selects 0 (first URL) or 1 (second URL). The 32-byte
-     * nonce is generated browser-side from `crypto.getRandomValues` (via
-     * `getrandom`'s "js" feature) — different on every call, so callers
-     * can correlate parallel attests by re-reading
-     * [`WasmAttestVerification::nonce_hex`].
+     * `serverIndex` selects 0 (first URL) or 1 (second URL). Internally
+     * the 32-byte nonce is *bound* to the X25519 handshake ephemeral
+     * the client will use in the subsequent `upgradeToSecureChannel`:
      *
-     * Use the returned `serverStaticPub` (32 bytes) as input to
-     * [`Self::upgradeToSecureChannel`]. Verifying the SEV-SNP report's
-     * AMD VCEK chain is a separate concern (Slice D) — until that
-     * lands, the V2 binding only proves internal consistency of the
-     * claimed server-side state, not the chip's signature.
+     * ```text
+     * eph_seed       = OsRng()                                  (cached per-server)
+     * client_eph_pub = X25519(eph_seed)
+     * random_32      = OsRng()
+     * nonce          = sha256("BPIR-ATTEST-NONCE-V1" || client_eph_pub || random_32)
+     * ```
+     *
+     * Caching the `eph_seed` here lets `upgradeToSecureChannel` reuse
+     * the same pubkey the report committed to, so the chip-signed
+     * REPORT_DATA covers *this* handshake — not a stale or replayed
+     * one. The `eph_seed` is never exposed to JS.
+     *
+     * Calling `attest(serverIndex)` twice for the same server rotates
+     * the cached seed (the prior eph is dropped). Callers should call
+     * `attest` for *both* servers before `upgradeToSecureChannel`.
      */
     attest(server_index: number): Promise<WasmAttestVerification>;
     /**
@@ -828,9 +954,15 @@ export class WasmDpfClient {
      * frame format — cloudflared (or any other transport-layer
      * intermediary) sees only ciphertext.
      *
-     * Errors if either connection isn't established, or if either
-     * handshake fails. On error, the connections are dropped — call
-     * [`Self::connect`] to re-establish.
+     * Uses the eph_seeds cached by [`Self::attest`] so the handshake's
+     * `client_eph_pub` matches the one the SEV-SNP REPORT_DATA
+     * committed to. **You MUST call `attest(0)` and `attest(1)` before
+     * this method**, otherwise it rejects with a JsError. On success
+     * the cached seeds are cleared (one-shot per attest call).
+     *
+     * Errors if either connection isn't established, either cached
+     * eph_seed is missing, or either handshake fails. On error, the
+     * connections are dropped — call [`Self::connect`] to re-establish.
      */
     upgradeToSecureChannel(server_static_pub_0: Uint8Array, server_static_pub_1: Uint8Array): Promise<void>;
     /**
@@ -886,9 +1018,17 @@ export class WasmHarmonyClient {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Send REQ_ANNOUNCE to the hint (`serverIndex=0`) or query
+     * (`serverIndex=1`) server. See [`WasmDpfClient::announce`] for
+     * full semantics.
+     */
+    announce(server_index: number): Promise<WasmAnnounceVerification>;
+    /**
      * Send REQ_ATTEST to the hint (`serverIndex=0`) or query
      * (`serverIndex=1`) server and return the verification result.
-     * See [`WasmDpfClient::attest`] for the full semantics.
+     * See [`WasmDpfClient::attest`] for the full semantics (including
+     * the bound-nonce derivation that ties this attestation to the
+     * subsequent handshake).
      */
     attest(server_index: number): Promise<WasmAttestVerification>;
     /**
@@ -1083,8 +1223,9 @@ export class WasmHarmonyClient {
     syncWithProgress(script_hashes: Uint8Array, last_height: number | null | undefined, progress: Function): Promise<WasmSyncResult>;
     /**
      * Wrap both server connections (hint + query) with the encrypted
-     * channel transport. See [`WasmDpfClient::upgrade_to_secure_channel`].
-     * Argument order matches `serverUrls()` — `(hint, query)`.
+     * channel transport. See [`WasmDpfClient::upgrade_to_secure_channel`]
+     * — same eph_seed caching + binding flow. Argument order matches
+     * `serverUrls()` — `(hint, query)`.
      */
     upgradeToSecureChannel(hint_server_static_pub: Uint8Array, query_server_static_pub: Uint8Array): Promise<void>;
     /**
@@ -1099,6 +1240,52 @@ export class WasmHarmonyClient {
      * True while both connections are live.
      */
     readonly isConnected: boolean;
+}
+
+/**
+ * JS-visible policy requirements for [`WasmAttestVerification::verify_full`].
+ * Constructed with sensible production defaults (strict). Mutate
+ * individual fields via the setters to relax.
+ */
+export class WasmPolicyRequirements {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Construct the strictest production policy: VMPL 0, no debug,
+     * no MA migration, TCB-monotonic. No measurement / family /
+     * image pin (set via the corresponding setters if you want them).
+     */
+    constructor();
+    /**
+     * Permit guests with `policy.debug_allowed` set. Production: leave false.
+     */
+    setAllowDebug(v: boolean): void;
+    /**
+     * Permit guests with `policy.migrate_ma_allowed` set. Production: leave false.
+     */
+    setAllowMigrateMa(v: boolean): void;
+    /**
+     * Pin the expected family_id (16 bytes).
+     */
+    setExpectedFamilyId(bytes: Uint8Array): void;
+    /**
+     * Pin the expected image_id (16 bytes).
+     */
+    setExpectedImageId(bytes: Uint8Array): void;
+    /**
+     * Pin the expected MEASUREMENT (48 bytes). Must be exactly 48
+     * bytes or a JsError is thrown. Set to the operator-published
+     * value for your Tier 3 UKI.
+     */
+    setExpectedMeasurement(bytes: Uint8Array): void;
+    /**
+     * Raise the VMPL ceiling. Production: leave at 0.
+     */
+    setMaxVmpl(v: number): void;
+    /**
+     * Require guests to have `policy.single_socket_required`. Off by default.
+     */
+    setRequireSingleSocket(v: boolean): void;
 }
 
 /**
@@ -1475,6 +1662,15 @@ export function readVarint(data: Uint8Array, offset: number): Uint32Array;
 export function splitmix64(x_hi: number, x_lo: number): Uint8Array;
 
 /**
+ * JS-visible accessor for the Turin ARK fingerprint pinned in
+ * pir-attest-verify (matches `web/src/attest-pin.ts`). Returns the
+ * 32-byte SHA-256 as a Uint8Array. Pass directly to
+ * [`WasmAttestVerification::verify_full`] /
+ * [`WasmAttestVerification::verify_vcek_chain`] for Turin servers.
+ */
+export function turinArkFingerprint(): Uint8Array;
+
+/**
  * Walk one bin-Merkle proof from leaf to root.
  *
  * `sibling_rows_flat` must carry `cache_from_level × BUCKET_MERKLE_SIB_ROW_SIZE`
@@ -1519,6 +1715,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly PRP_FASTPRP: () => number;
     readonly PRP_HMR12: () => number;
+    readonly __wbg_wasmannounceverification_free: (a: number, b: number) => void;
     readonly __wbg_wasmarcpresentationstate_free: (a: number, b: number) => void;
     readonly __wbg_wasmatomicmetrics_free: (a: number, b: number) => void;
     readonly __wbg_wasmattestverification_free: (a: number, b: number) => void;
@@ -1526,6 +1723,7 @@ export interface InitOutput {
     readonly __wbg_wasmdatabasecatalog_free: (a: number, b: number) => void;
     readonly __wbg_wasmdpfclient_free: (a: number, b: number) => void;
     readonly __wbg_wasmharmonyclient_free: (a: number, b: number) => void;
+    readonly __wbg_wasmpolicyrequirements_free: (a: number, b: number) => void;
     readonly __wbg_wasmqueryresult_free: (a: number, b: number) => void;
     readonly __wbg_wasmsyncplan_free: (a: number, b: number) => void;
     readonly __wbg_wasmsyncresult_free: (a: number, b: number) => void;
@@ -1548,10 +1746,21 @@ export interface InitOutput {
     readonly readVarint: (a: number, b: number, c: number) => [number, number];
     readonly splitmix64: (a: number, b: number) => [number, number];
     readonly verifyBucketMerkleItem: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+    readonly wasmannounceverification_binarySha256Hex: (a: number) => [number, number];
+    readonly wasmannounceverification_chainError: (a: number) => [number, number];
+    readonly wasmannounceverification_chainVerified: (a: number) => number;
+    readonly wasmannounceverification_channelPub: (a: number) => any;
+    readonly wasmannounceverification_channelPubHex: (a: number) => [number, number];
+    readonly wasmannounceverification_gitRev: (a: number) => [number, number];
+    readonly wasmannounceverification_identityPubkeyHex: (a: number) => [number, number];
+    readonly wasmannounceverification_issuedAt: (a: number) => bigint;
+    readonly wasmannounceverification_operatorPubkeyHex: (a: number) => [number, number];
+    readonly wasmannounceverification_serverId: (a: number) => [number, number];
+    readonly wasmannounceverification_validFrom: (a: number) => bigint;
+    readonly wasmannounceverification_validUntil: (a: number) => bigint;
     readonly wasmarcpresentationstate_deserialize: (a: number, b: number) => [number, number, number];
     readonly wasmarcpresentationstate_limit: (a: number) => bigint;
     readonly wasmarcpresentationstate_new: (a: number, b: number, c: number, d: number, e: bigint) => [number, number, number];
-    readonly wasmarcpresentationstate_nonce: (a: number) => bigint;
     readonly wasmarcpresentationstate_present: (a: number) => [number, number, number, number];
     readonly wasmarcpresentationstate_remaining: (a: number) => bigint;
     readonly wasmarcpresentationstate_serialize: (a: number) => [number, number];
@@ -1571,6 +1780,7 @@ export interface InitOutput {
     readonly wasmattestverification_sevSnpReport: (a: number) => any;
     readonly wasmattestverification_sevStatus: (a: number) => [number, number];
     readonly wasmattestverification_vcekPem: (a: number) => any;
+    readonly wasmattestverification_verifyFull: (a: number, b: number, c: number, d: number) => [number, number];
     readonly wasmattestverification_verifyVcekChain: (a: number, b: number, c: number) => [number, number];
     readonly wasmbucketmerkletreetops_cacheFromLevel: (a: number, b: number) => number;
     readonly wasmbucketmerkletreetops_fromBytes: (a: number, b: number) => [number, number, number];
@@ -1584,6 +1794,7 @@ export interface InitOutput {
     readonly wasmdatabasecatalog_latestTip: (a: number) => number;
     readonly wasmdatabasecatalog_new: () => number;
     readonly wasmdatabasecatalog_toJson: (a: number) => any;
+    readonly wasmdpfclient_announce: (a: number, b: number) => any;
     readonly wasmdpfclient_attest: (a: number, b: number) => any;
     readonly wasmdpfclient_clearMetricsRecorder: (a: number) => void;
     readonly wasmdpfclient_connect: (a: number) => any;
@@ -1600,6 +1811,7 @@ export interface InitOutput {
     readonly wasmdpfclient_syncWithProgress: (a: number, b: any, c: number, d: any) => any;
     readonly wasmdpfclient_upgradeToSecureChannel: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly wasmdpfclient_verifyMerkleBatch: (a: number, b: any, c: number) => any;
+    readonly wasmharmonyclient_announce: (a: number, b: number) => any;
     readonly wasmharmonyclient_attest: (a: number, b: number) => any;
     readonly wasmharmonyclient_clearMetricsRecorder: (a: number) => void;
     readonly wasmharmonyclient_connect: (a: number) => any;
@@ -1626,6 +1838,14 @@ export interface InitOutput {
     readonly wasmharmonyclient_syncWithProgress: (a: number, b: any, c: number, d: any) => any;
     readonly wasmharmonyclient_upgradeToSecureChannel: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly wasmharmonyclient_verifyMerkleBatch: (a: number, b: any, c: number) => any;
+    readonly wasmpolicyrequirements_new: () => number;
+    readonly wasmpolicyrequirements_setAllowDebug: (a: number, b: number) => void;
+    readonly wasmpolicyrequirements_setAllowMigrateMa: (a: number, b: number) => void;
+    readonly wasmpolicyrequirements_setExpectedFamilyId: (a: number, b: number, c: number) => [number, number];
+    readonly wasmpolicyrequirements_setExpectedImageId: (a: number, b: number, c: number) => [number, number];
+    readonly wasmpolicyrequirements_setExpectedMeasurement: (a: number, b: number, c: number) => [number, number];
+    readonly wasmpolicyrequirements_setMaxVmpl: (a: number, b: number) => void;
+    readonly wasmpolicyrequirements_setRequireSingleSocket: (a: number, b: number) => void;
     readonly wasmqueryresult_chunkBins: (a: number) => any;
     readonly wasmqueryresult_entryCount: (a: number) => number;
     readonly wasmqueryresult_fromJson: (a: any) => [number, number, number];
@@ -1650,6 +1870,8 @@ export interface InitOutput {
     readonly xorBuffers: (a: number, b: number, c: number, d: number) => [number, number];
     readonly __wasm_init: () => void;
     readonly initTracingSubscriber: () => void;
+    readonly turinArkFingerprint: () => any;
+    readonly wasmarcpresentationstate_nonce: (a: number) => bigint;
     readonly wasmsyncresult_syncedHeight: (a: number) => number;
     readonly wasmsyncresult_wasFreshSync: (a: number) => number;
     readonly __wbg_harmonyanswerpair_free: (a: number, b: number) => void;
@@ -1689,12 +1911,12 @@ export interface InitOutput {
     readonly verify_protocol: (a: number, b: number) => number;
     readonly harmonyrequest_position: (a: number) => number;
     readonly wasm_bindgen__closure__destroy__h490263039c0c107c: (a: number, b: number) => void;
-    readonly wasm_bindgen__closure__destroy__h05758780b86cf271: (a: number, b: number) => void;
+    readonly wasm_bindgen__closure__destroy__h0ce9efb4136d99f9: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen__convert__closures_____invoke__h1227e1e7bfd44bf9: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14_2: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14_3: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_2: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_3: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

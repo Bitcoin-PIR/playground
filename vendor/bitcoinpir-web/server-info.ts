@@ -15,6 +15,13 @@ export interface OnionPirInfoJson {
   index_bins_per_table: number;
   chunk_bins_per_table: number;
   tag_seed: bigint;
+  /**
+   * INDEX/CHUNK cuckoo master seeds (chain-derived for v2 DBs). `0n`
+   * when the server doesn't emit them (pre-ext server) — the client
+   * then keeps its legacy-constant default.
+   */
+  index_master_seed: bigint;
+  chunk_master_seed: bigint;
   index_k: number;
   chunk_k: number;
   index_slots_per_bin: number;
@@ -37,7 +44,6 @@ export interface ServerInfoJson {
   chunk_slot_size: number;
   role: 'primary' | 'secondary';
   onionpir?: OnionPirInfoJson;
-  merkle?: MerkleInfoJson;
   merkle_bucket?: BucketMerkleInfoJson;
   onionpir_merkle?: OnionPirMerkleInfoJson;
   /** Per-database info (Merkle availability). Present when server has >1 DB or any DB has bucket Merkle. */
@@ -59,22 +65,9 @@ export interface PerDatabaseInfoJson {
   onionpir_merkle?: OnionPirMerkleInfoJson;
 }
 
-export interface MerkleLevelInfo {
-  dpf_n: number;
-  bins_per_table: number;
-}
-
-export interface MerkleInfoJson {
-  arity: number;
-  sibling_levels: number;
-  sibling_k: number;
-  sibling_slots_per_bin: number;
-  sibling_slot_size: number;
-  levels: MerkleLevelInfo[];
-  root: string;             // hex (32 bytes)
-  tree_top_hash: string;   // SHA256 of tree-top cache blob (hex, 32 bytes)
-  tree_top_size: number;   // byte size of tree-top cache
-}
+// (The legacy global N-ary tree Merkle info — `MerkleInfoJson` / the
+// `merkle` field — was removed: the server no longer emits a `"merkle"`
+// section. Per-bucket bin Merkle below is the active scheme.)
 
 // ─── Per-bucket bin Merkle info ──────────────────────────────────────────
 
@@ -181,6 +174,8 @@ export function parseServerInfoJson(jsonStr: string): ServerInfoJson {
       index_bins_per_table: raw.onionpir.index_bins_per_table,
       chunk_bins_per_table: raw.onionpir.chunk_bins_per_table,
       tag_seed: BigInt(raw.onionpir.tag_seed),
+      index_master_seed: raw.onionpir.index_master_seed != null ? BigInt(raw.onionpir.index_master_seed) : 0n,
+      chunk_master_seed: raw.onionpir.chunk_master_seed != null ? BigInt(raw.onionpir.chunk_master_seed) : 0n,
       index_k: raw.onionpir.index_k,
       chunk_k: raw.onionpir.chunk_k,
       index_slots_per_bin: raw.onionpir.index_slots_per_bin,
@@ -210,6 +205,8 @@ export function parseServerInfoJson(jsonStr: string): ServerInfoJson {
     index_bins_per_table: op.index_bins_per_table,
     chunk_bins_per_table: op.chunk_bins_per_table,
     tag_seed: BigInt(op.tag_seed),
+    index_master_seed: op.index_master_seed != null ? BigInt(op.index_master_seed) : 0n,
+    chunk_master_seed: op.chunk_master_seed != null ? BigInt(op.chunk_master_seed) : 0n,
     index_k: op.index_k,
     chunk_k: op.chunk_k,
     index_slots_per_bin: op.index_slots_per_bin,
@@ -220,20 +217,6 @@ export function parseServerInfoJson(jsonStr: string): ServerInfoJson {
 
   if (raw.onionpir_merkle && typeof raw.onionpir_merkle === 'object') {
     info.onionpir_merkle = parseOnionPirMerkle(raw.onionpir_merkle);
-  }
-
-  if (raw.merkle && typeof raw.merkle === 'object') {
-    info.merkle = {
-      arity: raw.merkle.arity,
-      sibling_levels: raw.merkle.sibling_levels,
-      sibling_k: raw.merkle.sibling_k,
-      sibling_slots_per_bin: raw.merkle.sibling_slots_per_bin,
-      sibling_slot_size: raw.merkle.sibling_slot_size,
-      levels: raw.merkle.levels,
-      root: raw.merkle.root ?? '',
-      tree_top_hash: raw.merkle.tree_top_hash ?? '',
-      tree_top_size: raw.merkle.tree_top_size ?? 0,
-    };
   }
 
   if (raw.merkle_bucket && typeof raw.merkle_bucket === 'object') {
@@ -357,6 +340,16 @@ export interface DatabaseCatalogEntry {
   dpfNChunk: number;
   /** Whether this database has per-bucket bin Merkle verification data. */
   hasBucketMerkle: boolean;
+  /**
+   * INDEX/CHUNK cuckoo master seeds delivered by the server (chain-derived
+   * for v2 DBs). 0n for a legacy server that doesn't emit the ext section.
+   */
+  indexMasterSeed: bigint;
+  chunkMasterSeed: bigint;
+  /** Chain-anchor kind: 0 = none (legacy), 1 = snapshot, 2 = delta. */
+  anchorKind: number;
+  /** Hex of the raw anchor bytes (36/72), or "" for legacy DBs. */
+  anchorHex: string;
 }
 
 export interface DatabaseCatalog {
@@ -407,7 +400,31 @@ export function decodeDatabaseCatalog(data: Uint8Array): DatabaseCatalog {
       indexBinsPerTable, chunkBinsPerTable,
       indexK, chunkK, tagSeed,
       dpfNIndex, dpfNChunk, hasBucketMerkle,
+      // Patched from the trailing ext section below; defaults for a
+      // legacy server that doesn't emit it.
+      indexMasterSeed: 0n, chunkMasterSeed: 0n, anchorKind: 0, anchorHex: "",
     });
+  }
+
+  // Trailing ext section (CATALOG_EXT_V1 = 0x01): per-entry master seeds
+  // + chain anchor. Mirrors runtime::protocol::encode_db_catalog. A
+  // pre-ext server stops after the entries above, leaving the defaults.
+  const CATALOG_EXT_V1 = 0x01;
+  if (pos < data.length && data[pos] === CATALOG_EXT_V1) {
+    pos++;
+    for (const db of databases) {
+      if (pos + 17 > data.length) break; // truncated ext — keep defaults
+      db.indexMasterSeed = dv.getBigUint64(pos, true); pos += 8;
+      db.chunkMasterSeed = dv.getBigUint64(pos, true); pos += 8;
+      const kind = data[pos++];
+      db.anchorKind = kind;
+      const n = kind === 1 ? 36 : kind === 2 ? 72 : 0;
+      if (n > 0 && pos + n <= data.length) {
+        const bytes = data.slice(pos, pos + n);
+        db.anchorHex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+        pos += n;
+      }
+    }
   }
 
   return { databases };

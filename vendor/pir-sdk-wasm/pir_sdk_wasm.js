@@ -572,6 +572,210 @@ export function PRP_HMR12() {
 }
 
 /**
+ * JS-visible result of a `WasmDpfClient.announce()` (or
+ * `WasmHarmonyClient.announce()`) call.
+ *
+ * Carries the parsed operator-signed bundle:
+ * - `IdentityCert` (Tier 1): operator's offline Ed25519 key endorses
+ *   the server's identity_pubkey for a given server_id + validity
+ *   window.
+ * - `ChannelManifest` (Tier 2): server's per-boot Ed25519 key signs
+ *   the current channel_pub + build metadata.
+ *
+ * `chainVerified` tells you whether the two layers cross-check
+ * (manifest signature + identity_pubkey + server_id agreement).
+ * Pinning the operator pubkey is a separate, caller-driven step:
+ * compare `operatorPubkeyHex` against your pinned value, then call
+ * the IdentityCert's verify yourself if you want defense-in-depth on
+ * top of `chainVerified` — but `chainVerified` already runs the
+ * manifest signature check internally.
+ */
+export class WasmAnnounceVerification {
+    static __wrap(ptr) {
+        ptr = ptr >>> 0;
+        const obj = Object.create(WasmAnnounceVerification.prototype);
+        obj.__wbg_ptr = ptr;
+        WasmAnnounceVerificationFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WasmAnnounceVerificationFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_wasmannounceverification_free(ptr, 0);
+    }
+    /**
+     * Hex-encoded binary SHA-256 the manifest claims (self-reported,
+     * trustworthy iff the chain check passed).
+     * @returns {string}
+     */
+    get binarySha256Hex() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmannounceverification_binarySha256Hex(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Diagnostic string describing why `chainVerified` is false.
+     * Empty when verified.
+     * @returns {string}
+     */
+    get chainError() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmannounceverification_chainError(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Whether the in-bundle chain check passed: manifest signature
+     * valid against `identityPubkey`, and `cert.server_id` ==
+     * `manifest.server_id`, and `cert.identity_pubkey` ==
+     * `manifest.identity_pubkey`. Does NOT include cert-vs-pinned-
+     * operator verification (caller-driven).
+     * @returns {boolean}
+     */
+    get chainVerified() {
+        const ret = wasm.wasmannounceverification_chainVerified(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
+     * X25519 channel pubkey the manifest endorses. Cross-check
+     * against the value you'll handshake with (e.g.
+     * `attestVerification.serverStaticPub`). Returns the raw 32 bytes.
+     * @returns {Uint8Array}
+     */
+    get channelPub() {
+        const ret = wasm.wasmannounceverification_channelPub(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Same data as [`Self::channel_pub`] but hex-encoded for display.
+     * @returns {string}
+     */
+    get channelPubHex() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmannounceverification_channelPubHex(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Server-self-reported git rev (string).
+     * @returns {string}
+     */
+    get gitRev() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmannounceverification_gitRev(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Hex-encoded identity pubkey the operator endorsed for this
+     * server. The Tier-2 manifest signature chains back to this key.
+     * @returns {string}
+     */
+    get identityPubkeyHex() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmannounceverification_identityPubkeyHex(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Manifest's `issued_at` timestamp (unix-seconds). Use this to
+     * apply a freshness policy if you want one.
+     * @returns {bigint}
+     */
+    get issuedAt() {
+        const ret = wasm.wasmannounceverification_issuedAt(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Hex-encoded operator pubkey (the Tier-1 signer). Compare this
+     * against the value the operator published out-of-band (e.g. via
+     * Nostr) before trusting any of the bundle's fields.
+     * @returns {string}
+     */
+    get operatorPubkeyHex() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmannounceverification_operatorPubkeyHex(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Server identifier the cert was endorsed for (e.g. "pir1").
+     * @returns {string}
+     */
+    get serverId() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmannounceverification_serverId(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Cert validity lower bound (unix-seconds). 0 = no lower bound.
+     * @returns {bigint}
+     */
+    get validFrom() {
+        const ret = wasm.wasmannounceverification_validFrom(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * Cert validity upper bound (unix-seconds). 0 = indefinite.
+     * @returns {bigint}
+     */
+    get validUntil() {
+        const ret = wasm.wasmannounceverification_validUntil(this.__wbg_ptr);
+        return ret;
+    }
+}
+if (Symbol.dispose) WasmAnnounceVerification.prototype[Symbol.dispose] = WasmAnnounceVerification.prototype.free;
+
+/**
  * Opaque handle wrapping an ARC `PresentationState` + `Credential`.
  *
  * The credential is obtained from the payment service as a byte blob
@@ -1022,6 +1226,38 @@ export class WasmAttestVerification {
         return ret;
     }
     /**
+     * Highest-level SEV-SNP check: runs `verifyVcekChain`'s four
+     * steps AND the policy assertions described below — in a single
+     * call. On success, the report is fully trustworthy
+     * (signature-anchored AND content-acceptable).
+     *
+     * `expectedArkFingerprint`: same as `verifyVcekChain`. Pass the
+     * `AMD_TURIN_ARK_FINGERPRINT` constant from `attest-pin.ts` for
+     * production.
+     *
+     * `policy` is a `WasmPolicyRequirements` (constructed via its
+     * JS-visible constructor + setters). Defaults to the strictest
+     * production policy: VMPL 0, no debug, no migration, TCB
+     * monotonic. Override individual fields for tests / non-strict
+     * deployments.
+     *
+     * Throws a single-line JsError on the FIRST failing step (chain
+     * → report sig → policy). Use `verifyVcekChain` directly if you
+     * want to surface the chain / sig failure separately from a
+     * policy failure.
+     * @param {Uint8Array | null | undefined} expected_ark_fingerprint
+     * @param {WasmPolicyRequirements} policy
+     */
+    verifyFull(expected_ark_fingerprint, policy) {
+        var ptr0 = isLikeNone(expected_ark_fingerprint) ? 0 : passArray8ToWasm0(expected_ark_fingerprint, wasm.__wbindgen_malloc);
+        var len0 = WASM_VECTOR_LEN;
+        _assertClass(policy, WasmPolicyRequirements);
+        const ret = wasm.wasmattestverification_verifyFull(this.__wbg_ptr, ptr0, len0, policy.__wbg_ptr);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * One-shot AMD VCEK chain validation. Verifies:
      *   1. The ARK PEM's SHA-256 fingerprint matches
      *      `expectedArkFingerprint` (a 32-byte operator-pinned value
@@ -1292,20 +1528,44 @@ export class WasmDpfClient {
         wasm.__wbg_wasmdpfclient_free(ptr, 0);
     }
     /**
+     * Send REQ_ANNOUNCE to one of the connected servers and return a
+     * [`WasmAnnounceVerification`] with the parsed operator-signed
+     * identity bundle.
+     *
+     * Errors with the server's RESP_ERROR text ("announce not
+     * configured") if the server doesn't have an identity key + cert
+     * installed. That's a soft state — attest / handshake / queries
+     * still work as normal.
+     * @param {number} server_index
+     * @returns {Promise<WasmAnnounceVerification>}
+     */
+    announce(server_index) {
+        const ret = wasm.wasmdpfclient_announce(this.__wbg_ptr, server_index);
+        return ret;
+    }
+    /**
      * Send REQ_ATTEST to one of the connected servers and return a
      * [`WasmAttestVerification`] handle covering the response.
      *
-     * `serverIndex` selects 0 (first URL) or 1 (second URL). The 32-byte
-     * nonce is generated browser-side from `crypto.getRandomValues` (via
-     * `getrandom`'s "js" feature) — different on every call, so callers
-     * can correlate parallel attests by re-reading
-     * [`WasmAttestVerification::nonce_hex`].
+     * `serverIndex` selects 0 (first URL) or 1 (second URL). Internally
+     * the 32-byte nonce is *bound* to the X25519 handshake ephemeral
+     * the client will use in the subsequent `upgradeToSecureChannel`:
      *
-     * Use the returned `serverStaticPub` (32 bytes) as input to
-     * [`Self::upgradeToSecureChannel`]. Verifying the SEV-SNP report's
-     * AMD VCEK chain is a separate concern (Slice D) — until that
-     * lands, the V2 binding only proves internal consistency of the
-     * claimed server-side state, not the chip's signature.
+     * ```text
+     * eph_seed       = OsRng()                                  (cached per-server)
+     * client_eph_pub = X25519(eph_seed)
+     * random_32      = OsRng()
+     * nonce          = sha256("BPIR-ATTEST-NONCE-V1" || client_eph_pub || random_32)
+     * ```
+     *
+     * Caching the `eph_seed` here lets `upgradeToSecureChannel` reuse
+     * the same pubkey the report committed to, so the chip-signed
+     * REPORT_DATA covers *this* handshake — not a stale or replayed
+     * one. The `eph_seed` is never exposed to JS.
+     *
+     * Calling `attest(serverIndex)` twice for the same server rotates
+     * the cached seed (the prior eph is dropped). Callers should call
+     * `attest` for *both* servers before `upgradeToSecureChannel`.
      * @param {number} server_index
      * @returns {Promise<WasmAttestVerification>}
      */
@@ -1530,9 +1790,15 @@ export class WasmDpfClient {
      * frame format — cloudflared (or any other transport-layer
      * intermediary) sees only ciphertext.
      *
-     * Errors if either connection isn't established, or if either
-     * handshake fails. On error, the connections are dropped — call
-     * [`Self::connect`] to re-establish.
+     * Uses the eph_seeds cached by [`Self::attest`] so the handshake's
+     * `client_eph_pub` matches the one the SEV-SNP REPORT_DATA
+     * committed to. **You MUST call `attest(0)` and `attest(1)` before
+     * this method**, otherwise it rejects with a JsError. On success
+     * the cached seeds are cleared (one-shot per attest call).
+     *
+     * Errors if either connection isn't established, either cached
+     * eph_seed is missing, or either handshake fails. On error, the
+     * connections are dropped — call [`Self::connect`] to re-establish.
      * @param {Uint8Array} server_static_pub_0
      * @param {Uint8Array} server_static_pub_1
      * @returns {Promise<void>}
@@ -1609,9 +1875,22 @@ export class WasmHarmonyClient {
         wasm.__wbg_wasmharmonyclient_free(ptr, 0);
     }
     /**
+     * Send REQ_ANNOUNCE to the hint (`serverIndex=0`) or query
+     * (`serverIndex=1`) server. See [`WasmDpfClient::announce`] for
+     * full semantics.
+     * @param {number} server_index
+     * @returns {Promise<WasmAnnounceVerification>}
+     */
+    announce(server_index) {
+        const ret = wasm.wasmharmonyclient_announce(this.__wbg_ptr, server_index);
+        return ret;
+    }
+    /**
      * Send REQ_ATTEST to the hint (`serverIndex=0`) or query
      * (`serverIndex=1`) server and return the verification result.
-     * See [`WasmDpfClient::attest`] for the full semantics.
+     * See [`WasmDpfClient::attest`] for the full semantics (including
+     * the bound-nonce derivation that ties this attestation to the
+     * subsequent handshake).
      * @param {number} server_index
      * @returns {Promise<WasmAttestVerification>}
      */
@@ -1945,8 +2224,9 @@ export class WasmHarmonyClient {
     }
     /**
      * Wrap both server connections (hint + query) with the encrypted
-     * channel transport. See [`WasmDpfClient::upgrade_to_secure_channel`].
-     * Argument order matches `serverUrls()` — `(hint, query)`.
+     * channel transport. See [`WasmDpfClient::upgrade_to_secure_channel`]
+     * — same eph_seed caching + binding flow. Argument order matches
+     * `serverUrls()` — `(hint, query)`.
      * @param {Uint8Array} hint_server_static_pub
      * @param {Uint8Array} query_server_static_pub
      * @returns {Promise<void>}
@@ -1975,6 +2255,102 @@ export class WasmHarmonyClient {
     }
 }
 if (Symbol.dispose) WasmHarmonyClient.prototype[Symbol.dispose] = WasmHarmonyClient.prototype.free;
+
+/**
+ * JS-visible policy requirements for [`WasmAttestVerification::verify_full`].
+ * Constructed with sensible production defaults (strict). Mutate
+ * individual fields via the setters to relax.
+ */
+export class WasmPolicyRequirements {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WasmPolicyRequirementsFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_wasmpolicyrequirements_free(ptr, 0);
+    }
+    /**
+     * Construct the strictest production policy: VMPL 0, no debug,
+     * no MA migration, TCB-monotonic. No measurement / family /
+     * image pin (set via the corresponding setters if you want them).
+     */
+    constructor() {
+        const ret = wasm.wasmpolicyrequirements_new();
+        this.__wbg_ptr = ret >>> 0;
+        WasmPolicyRequirementsFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * Permit guests with `policy.debug_allowed` set. Production: leave false.
+     * @param {boolean} v
+     */
+    setAllowDebug(v) {
+        wasm.wasmpolicyrequirements_setAllowDebug(this.__wbg_ptr, v);
+    }
+    /**
+     * Permit guests with `policy.migrate_ma_allowed` set. Production: leave false.
+     * @param {boolean} v
+     */
+    setAllowMigrateMa(v) {
+        wasm.wasmpolicyrequirements_setAllowMigrateMa(this.__wbg_ptr, v);
+    }
+    /**
+     * Pin the expected family_id (16 bytes).
+     * @param {Uint8Array} bytes
+     */
+    setExpectedFamilyId(bytes) {
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmpolicyrequirements_setExpectedFamilyId(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Pin the expected image_id (16 bytes).
+     * @param {Uint8Array} bytes
+     */
+    setExpectedImageId(bytes) {
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmpolicyrequirements_setExpectedImageId(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Pin the expected MEASUREMENT (48 bytes). Must be exactly 48
+     * bytes or a JsError is thrown. Set to the operator-published
+     * value for your Tier 3 UKI.
+     * @param {Uint8Array} bytes
+     */
+    setExpectedMeasurement(bytes) {
+        const ptr0 = passArray8ToWasm0(bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmpolicyrequirements_setExpectedMeasurement(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Raise the VMPL ceiling. Production: leave at 0.
+     * @param {number} v
+     */
+    setMaxVmpl(v) {
+        wasm.wasmpolicyrequirements_setMaxVmpl(this.__wbg_ptr, v);
+    }
+    /**
+     * Require guests to have `policy.single_socket_required`. Off by default.
+     * @param {boolean} v
+     */
+    setRequireSingleSocket(v) {
+        wasm.wasmpolicyrequirements_setRequireSingleSocket(this.__wbg_ptr, v);
+    }
+}
+if (Symbol.dispose) WasmPolicyRequirements.prototype[Symbol.dispose] = WasmPolicyRequirements.prototype.free;
 
 /**
  * WASM wrapper for QueryResult.
@@ -2685,6 +3061,19 @@ export function splitmix64(x_hi, x_lo) {
 }
 
 /**
+ * JS-visible accessor for the Turin ARK fingerprint pinned in
+ * pir-attest-verify (matches `web/src/attest-pin.ts`). Returns the
+ * 32-byte SHA-256 as a Uint8Array. Pass directly to
+ * [`WasmAttestVerification::verify_full`] /
+ * [`WasmAttestVerification::verify_vcek_chain`] for Turin servers.
+ * @returns {Uint8Array}
+ */
+export function turinArkFingerprint() {
+    const ret = wasm.turinArkFingerprint();
+    return ret;
+}
+
+/**
  * Walk one bin-Merkle proof from leaf to root.
  *
  * `sibling_rows_flat` must carry `cache_from_level × BUCKET_MERKLE_SIB_ROW_SIZE`
@@ -3196,6 +3585,10 @@ function __wbg_get_imports() {
             const ret = arg0.versions;
             return ret;
         },
+        __wbg_wasmannounceverification_new: function(arg0) {
+            const ret = WasmAnnounceVerification.__wrap(arg0);
+            return ret;
+        },
         __wbg_wasmattestverification_new: function(arg0) {
             const ret = WasmAttestVerification.__wrap(arg0);
             return ret;
@@ -3213,23 +3606,23 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 271, function: Function { arguments: [Externref], shim_idx: 272, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 283, function: Function { arguments: [Externref], shim_idx: 284, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h490263039c0c107c, wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 387, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 388, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h05758780b86cf271, wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 406, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 407, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h0ce9efb4136d99f9, wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 387, function: Function { arguments: [NamedExternref("Event")], shim_idx: 388, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h05758780b86cf271, wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14_2);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 406, function: Function { arguments: [NamedExternref("Event")], shim_idx: 407, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h0ce9efb4136d99f9, wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_2);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 387, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 388, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h05758780b86cf271, wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14_3);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 406, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 407, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h0ce9efb4136d99f9, wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_3);
             return ret;
         },
         __wbindgen_cast_0000000000000005: function(arg0) {
@@ -3273,16 +3666,16 @@ function __wbg_get_imports() {
     };
 }
 
-function wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14_2(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14_2(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_2(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_2(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14_3(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h60c8469c2196cb14_3(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_3(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_3(arg0, arg1, arg2);
 }
 
 function wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c(arg0, arg1, arg2) {
@@ -3310,6 +3703,9 @@ const HarmonyRequestFinalization = (typeof FinalizationRegistry === 'undefined')
 const HarmonyRequestPairFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_harmonyrequestpair_free(ptr >>> 0, 1));
+const WasmAnnounceVerificationFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_wasmannounceverification_free(ptr >>> 0, 1));
 const WasmArcPresentationStateFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmarcpresentationstate_free(ptr >>> 0, 1));
@@ -3331,6 +3727,9 @@ const WasmDpfClientFinalization = (typeof FinalizationRegistry === 'undefined')
 const WasmHarmonyClientFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmharmonyclient_free(ptr >>> 0, 1));
+const WasmPolicyRequirementsFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_wasmpolicyrequirements_free(ptr >>> 0, 1));
 const WasmQueryResultFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmqueryresult_free(ptr >>> 0, 1));

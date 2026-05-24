@@ -1,11 +1,16 @@
+import { requireSdkWasm } from './sdk-bridge.js';
+
 /**
  * Operator-pinned 32-byte SHA-256 fingerprint of the AMD ARK (Root
- * Key) certificate.
+ * Key) certificate, as a human-readable hex string.
  *
- * This is the trust anchor for browser-side AMD VCEK chain validation
- * (Slice D). When the adapter calls `verifyVcekChain`, it computes
- * SHA-256(ARK_DER) and compares to this constant; mismatch = the
- * server's bundled cert chain doesn't actually root at AMD's ARK.
+ * This constant is **documentation** — the live runtime value used by
+ * the verifier comes from the WASM module (`turinArkFingerprint()`,
+ * exported from `pir-attest-verify::TURIN_ARK_FINGERPRINT_SHA256`).
+ * Keeping the hex here gives operators a searchable, auditable copy
+ * of the pinned value AND a build-time cross-check (see
+ * [`getAmdTurinArkFingerprint`] below) that catches drift if anyone
+ * ever rotates one without the other.
  *
  * Pinned 2026-05-03 by the operator from the Turin family ARK at
  * https://kdsintf.amd.com/vcek/v1/Turin/cert_chain (second PEM block).
@@ -16,7 +21,9 @@
  *        # Split, then SHA-256 the ARK DER:
  *        csplit -z -f cert_ -b "%d.pem" cert_chain.pem '/-----BEGIN CERT/' '{*}'
  *        openssl x509 -in cert_1.pem -outform DER | sha256sum
- *   3. Replace the hex below + rebuild + redeploy the web bundle.
+ *   3. Replace the hex below AND the Rust constant
+ *      `pir-attest-verify::TURIN_ARK_FINGERPRINT_SHA256`, then rebuild
+ *      the WASM bundle.
  *
  * Same fingerprint applies to all Turin-family chips. (Genoa, Milan,
  * etc. would have different ARKs and need their own pins; we only
@@ -25,9 +32,11 @@
 export const AMD_TURIN_ARK_FINGERPRINT_HEX =
   '1f084161a44bb6d93778a904877d4819cafa5d05ef4193b2ded9dd9c73dd3f6a';
 
-/** Same as `AMD_TURIN_ARK_FINGERPRINT_HEX` but as Uint8Array — the
- *  shape `WasmAttestVerification.verifyVcekChain` expects. */
-export const AMD_TURIN_ARK_FINGERPRINT: Uint8Array = (() => {
+/** Decode the hex constant once at module load. Used as the
+ *  authoritative *human-readable* source — the runtime value comes
+ *  from WASM and is checked against this at [`getAmdTurinArkFingerprint`]
+ *  call time. */
+const HEX_AS_BYTES: Uint8Array = (() => {
   const hex = AMD_TURIN_ARK_FINGERPRINT_HEX;
   const out = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
@@ -35,6 +44,57 @@ export const AMD_TURIN_ARK_FINGERPRINT: Uint8Array = (() => {
   }
   return out;
 })();
+
+/**
+ * Return the 32-byte ARK fingerprint sourced from the WASM module
+ * (which mirrors the Rust constant
+ * `pir-attest-verify::TURIN_ARK_FINGERPRINT_SHA256`).
+ *
+ * Throws if [`initSdkWasm`] hasn't resolved yet — the WASM module is
+ * the single source of truth, so this function intentionally has no
+ * pure-TS fallback. Callers that need the value before WASM init can
+ * use [`AMD_TURIN_ARK_FINGERPRINT_HEX`] for display purposes only
+ * (never as the value passed to `verifyVcekChain` / `verifyFull` —
+ * that would defeat the cross-check).
+ *
+ * On first call after WASM init, cross-checks the WASM-exported bytes
+ * against the hex constant and throws on mismatch (build-time drift
+ * between Rust + TS). Subsequent calls return the cached Uint8Array.
+ */
+let cachedArkFingerprint: Uint8Array | null = null;
+export function getAmdTurinArkFingerprint(): Uint8Array {
+  if (cachedArkFingerprint) return cachedArkFingerprint;
+  const sdk = requireSdkWasm();
+  const fromWasm = sdk.turinArkFingerprint();
+  if (fromWasm.length !== 32) {
+    throw new Error(
+      `attest-pin: WASM turinArkFingerprint returned ${fromWasm.length} bytes (expected 32)`,
+    );
+  }
+  for (let i = 0; i < 32; i++) {
+    if (fromWasm[i] !== HEX_AS_BYTES[i]) {
+      throw new Error(
+        `attest-pin: ARK fingerprint mismatch between WASM (${bytesToHex(fromWasm)}) ` +
+          `and AMD_TURIN_ARK_FINGERPRINT_HEX (${AMD_TURIN_ARK_FINGERPRINT_HEX}). ` +
+          `One was rotated without the other — fix and rebuild.`,
+      );
+    }
+  }
+  cachedArkFingerprint = fromWasm;
+  return fromWasm;
+}
+
+/**
+ * @deprecated Use [`getAmdTurinArkFingerprint`] instead. This eager
+ * Uint8Array is kept for back-compat with pre-Slice-D.4 callers; new
+ * code should source from WASM so the cross-check fires. Will be
+ * removed once `dpf-adapter.ts` / `harmonypir-adapter.ts` migrate.
+ */
+export const AMD_TURIN_ARK_FINGERPRINT: Uint8Array = HEX_AS_BYTES;
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 /**
  * Per-server build-time pins for values the SEV-SNP report surfaces.
@@ -65,28 +125,29 @@ export interface ServerAttestPin {
 }
 
 /**
- * weikeng2.bitcoinpir.org — VPSBG Tier 3 UKI v18, pinned 2026-05-20.
+ * weikeng2.bitcoinpir.org — VPSBG Tier 3 UKI v20, pinned 2026-05-24.
  * Built by the `packages.tier3-uki` flake derivation
  * (`nix build --impure .#tier3-uki`) on the Hetzner build host: VPSBG
  * kernel 7.0.0-15 + the reproducible `nix build .#unified-server`
  * binary, embedded via the full Nix closure.
  */
 export const PIR2_TIER3_PIN: ServerAttestPin = {
-  // Tier 3 UKI v18 — 2026-05-20. Rebaked from main @ 90bcaef4 to ship
-  // PRs #5/#6/#7 (web vendor cleanup, harmony_decode_counts wasm
-  // binding, Harmony hint coalescing). The flake-built UKI embeds the
-  // reproducible Nix `unified_server` (`2ba6e79c…`), and pir1 was
-  // installed with the SAME Nix-built binary so PIR1_PIN and
-  // PIR2_TIER3_PIN share `binarySha256Hex` again.
-  // pir2 runs `--serve-queries` only (no hint pool) and does not serve
-  // OnionPIR. MEASUREMENT captured from the v18 deploy via
+  // Tier 3 UKI v20 — 2026-05-24. Rebaked from main @ ea4ee8c8: the v19
+  // chain-anchored deploy (`b07a00d2…`) had an OnionPIR query-path SEGV
+  // (onion_chunk_cuckoo read its tables at a hardcoded offset 36, which on
+  // a v2 file is the chain-anchor bytes → out-of-range entry-ids → NTT
+  // OOB). ea4ee8c8 fixes the reader (offset = 36 + anchor_len) and
+  // rebuilds the reproducible Nix `unified_server` (`71a041ae…`). pir1
+  // runs the SAME Nix binary so PIR1_PIN and PIR2_TIER3_PIN share
+  // `binarySha256Hex`. pir2 runs `--serve-queries` only (no hint pool)
+  // and does not serve OnionPIR. MEASUREMENT captured from the v20 deploy via
   // `bpir-admin attest wss://weikeng2.bitcoinpir.org` (SEV-SNP report
   // Status: ReportDataMatch — attestation verified on real hardware).
   measurementHex:
-    '53eb00331081ed7ee27df20a40c7d8d9be4c0a6a93cf043e876508a0f1fc74658987c03cceced379b5bf23e715a9435b',
+    '1573de58b181b06d913ac536be8fd36da4bb8c79e0a6c2ccde5564198e87190d3b8fd5bc741ba208158e83cda33cfa4b',
   binarySha256Hex:
-    '2ba6e79c388f54867988885785512f42864d5ceb3b88d1e1d5b8d24459d2f46c',
-  description: 'weikeng2.bitcoinpir.org (VPSBG, SEV-SNP, Tier 3 UKI v18)',
+    '71a041ae1931b81563f460c6e028c96706ea1c2f66545ee700479c0e5c5a93b6',
+  description: 'weikeng2.bitcoinpir.org (VPSBG, SEV-SNP, Tier 3 UKI v20)',
 };
 
 /**
@@ -98,14 +159,13 @@ export const PIR2_TIER3_PIN: ServerAttestPin = {
  */
 export const PIR1_PIN: ServerAttestPin = {
   // No measurementHex — Hetzner has no SEV.
-  // Bumped 2026-05-20: pir1 redeployed from main @ 90bcaef4 to ship
-  // PRs #5/#6/#7 (web vendor cleanup, harmony_decode_counts wasm
-  // binding, Harmony hint coalescing). Binary is the reproducible
-  // `nix build .#unified-server` output (same Nix-built binary
-  // embedded in the v18 Tier-3 UKI for pir2, so once pir2 boots
-  // v18, PIR1_PIN and PIR2_TIER3_PIN share `binarySha256Hex`
-  // again — the shared-binary invariant from v17 is preserved).
+  // Bumped 2026-05-24 (v20): pir1 redeployed from main @ ea4ee8c8 (the
+  // OnionPIR onion_chunk_cuckoo v2-anchor offset SEGV fix). Binary is the
+  // reproducible `nix build .#unified-server` output (`71a041ae…`) — the
+  // same Nix binary embedded in the v20 Tier-3 UKI for pir2, so PIR1_PIN
+  // and PIR2_TIER3_PIN share `binarySha256Hex` (shared-binary invariant
+  // preserved).
   binarySha256Hex:
-    '2ba6e79c388f54867988885785512f42864d5ceb3b88d1e1d5b8d24459d2f46c',
+    '71a041ae1931b81563f460c6e028c96706ea1c2f66545ee700479c0e5c5a93b6',
   description: 'weikeng1.bitcoinpir.org (Hetzner i7-8700, no SEV)',
 };
