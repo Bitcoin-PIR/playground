@@ -138,7 +138,7 @@ Source of truth: CLAUDE.md in the main `Bitcoin-PIR/Bitcoin-PIR` repo. Mirror he
 | `wss://weikeng1.bitcoinpir.org` | hint + DPF + OnionPIR query | Hetzner i7-8700 (no SEV) | binary SHA-256 pin only |
 | `wss://weikeng2.bitcoinpir.org` | HarmonyPIR query (`--serve-queries` only, no OnionPIR) | VPSBG SEV-SNP, Tier 3 UKI | SEV-SNP MEASUREMENT + binary SHA-256 |
 
-Pins live in `vendor/bitcoinpir-web/attest-pin.ts`. Both servers run the **same** reproducible `nix build .#unified-server` binary (currently `f7df82d0…`) — so `PIR1_PIN.binarySha256Hex == PIR2_TIER3_PIN.binarySha256Hex`. pir2's Tier-3 UKI **v22** embeds the same binary; MEASUREMENT is `41461a88…`. The v22 binary also stages operator-signed identity (`--identity-*`), but the `REQ_ANNOUNCE` *dispatch* arm isn't deployed yet — servers answer `0x07-unsupported` — so the announce flow is **dormant** and no client verifies operator identity. Don't surface a "verified operator" badge until upstream ships + re-pins a dispatch-arm binary (see `vendor/bitcoinpir-web/attest-pin.ts::PIR_OPERATOR_PUBKEY_HEX`).
+Pins live in `vendor/bitcoinpir-web/attest-pin.ts`. Both servers run the **same** reproducible `nix build .#unified-server` binary (currently `57ac525b…`) — so `PIR1_PIN.binarySha256Hex == PIR2_TIER3_PIN.binarySha256Hex`. pir2's Tier-3 UKI **v23** embeds the same binary; MEASUREMENT is `4fb0ad57…`. The v23 binary also stages operator-signed identity (`--identity-*`), but the `REQ_ANNOUNCE` *dispatch* arm isn't deployed yet — servers answer `0x07-unsupported` — so the announce flow is **dormant** and no client verifies operator identity. Don't surface a "verified operator" badge until upstream ships + re-pins a dispatch-arm binary (see `vendor/bitcoinpir-web/attest-pin.ts::PIR_OPERATOR_PUBKEY_HEX`).
 
 If a redeploy bumps either SHA or MEASUREMENT: update `vendor/bitcoinpir-web/attest-pin.ts` in the main repo, push, resync vendor here.
 
@@ -161,6 +161,13 @@ npm run sync-vendor             # resync vendor/ from $BITCOINPIR_REPO
 Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
+
+## Recent history (2026-05-26)
+
+Re-vendored the **v23 attestation pins** from `Bitcoin-PIR/Bitcoin-PIR` `main @ c322e825` (PR #12) and redeployed (commit `6f3003c`):
+- **Why:** upstream shipped a **correctness fix** — DPF-PIR + HarmonyPIR were returning **0 UTXOs for funded addresses** (an anchor-aware cuckoo table-offset bug, server-side: `pir-runtime-core/src/table.rs`, `build/src/merkle_bucket_builder.rs`, `runtime/src/hint_pool.rs`). Both servers redeployed on a new reproducible binary `57ac525b…`, so this site's v22 pin (`f7df82d0…`) went stale → `binary_sha256` mismatch / channel-binding failure → DPF/HarmonyPIR wouldn't hold a connection.
+- **What:** `PIR1_PIN` + `PIR2_TIER3_PIN` `binarySha256Hex` → `57ac525b…`; `PIR2_TIER3_PIN.measurementHex` → `4fb0ad57…` (VPSBG Tier-3 UKI **v23**). Fix is **server-side only** → vendored `pir-sdk-wasm` byte-identical, no rebuild. ARK + operator pubkey unchanged; manifest root not pinned. Pin lineage: …`f7df82d0…` (v22) → `57ac525b…` (v23).
+- **Verified live** (local build against the production servers): DPF + HarmonyPIR both attest clean (pir1 `unsupported`/pin-ok, pir2 `verified-vcek`) and now return correct UTXOs — `1D4HSHPJ…` → 1,600 sats, `bc1q2292…` → 12,900 sats — Merkle passing. OnionPIR unaffected.
 
 ## Recent history (2026-05-25)
 
@@ -234,16 +241,16 @@ Migrated from `bitcoin-pir.github.io/playground/` → `sdk.bitcoinpir.org`:
 | `ERR_CERT_COMMON_NAME_INVALID` on `sdk.bitcoinpir.org` | Cert hasn't provisioned yet OR Cloudflare proxy is on but SSL mode is Flexible | Wait 5-30 min; verify `gh api repos/Bitcoin-PIR/playground/pages` shows `https_certificate.state` = `issued`/`approved`; ensure Cloudflare proxy is OFF or SSL = Full (strict) |
 | Pages workflow fails on push | Probably typecheck or lint regression introduced upstream | `npm run typecheck` + `npm run lint` locally, fix, push |
 | `OnionPIR — Failed to fetch /wasm/onionpir_client.mjs` | `NEXT_PUBLIC_BASE_PATH` not in sync with deploy path | Verify `next.config.mjs` env block matches the deploy URL (root = `''`, subpath = `/playground`) |
-| Live HarmonyPIR query emits ~622 hint frames again | The new server binary got rolled back, or pir1/pir2 are running the pre-#7 binary | Re-run `nix build .#unified-server` + redeploy on pir1; rebuild UKI (current: v22) + redeploy on pir2 |
+| Live HarmonyPIR query emits ~622 hint frames again | The new server binary got rolled back, or pir1/pir2 are running the pre-#7 binary | Re-run `nix build .#unified-server` + redeploy on pir1; rebuild UKI (current: v23) + redeploy on pir2 |
 | `UNKNOWN_0x44` / `UNKNOWN_0x46` reappears in the wire timeline | Vendor `constants.ts` got resynced from a pre-#5 commit | Resync from main `>= 7d54428d` |
 
 ---
 
-## Pin / hash reference (as of 2026-05-25)
+## Pin / hash reference (as of 2026-05-26)
 
-- Reproducible unified_server binary: SHA-256 `f7df82d04fb4a02fa51f6d595f04ea302fefece7da15b33bd30c7102f9729101`
-- Tier 3 UKI: **v22** (2026-05-25) — the SEV-SNP MEASUREMENT below is the attested value. No standalone UKI file SHA-256 was published this release; clients pin the binary SHA + MEASUREMENT, not the UKI file. (v21 was a mis-deploy that crash-looped; v22 is correct.)
-- SEV-SNP MEASUREMENT (Tier 3 UKI v22): `41461a8856cc2ca9e2157c7e71fb75c618c03e4d28f5dac4346cefe528229f906568ed8effc934e31ada9c6afaee786e`
+- Reproducible unified_server binary: SHA-256 `57ac525b1d92656a0ae39d6def562d6fc2889a8c6337b8b34f71a59d6ac44d59`
+- Tier 3 UKI: **v23** (2026-05-26) — the SEV-SNP MEASUREMENT below is the attested value. No standalone UKI file SHA-256 was published this release; clients pin the binary SHA + MEASUREMENT, not the UKI file.
+- SEV-SNP MEASUREMENT (Tier 3 UKI v23): `4fb0ad57b28b7c33e6b2977f911fd6bf407ccf28bbab3ef9d24dceec579464a5961e10f5297a294c7dde24839eca4c6e`
 - Operator (Tier-1) identity pubkey: `256fb106c039f8009d3caa431a9634ff3fe5db3b9e4d9ae7282bbde66772c97a` — pinned in `attest-pin.ts::PIR_OPERATOR_PUBKEY_HEX`. **Dormant:** the `REQ_ANNOUNCE` dispatch arm isn't deployed (servers answer `0x07-unsupported`), so no client verifies operator identity yet.
 - AMD Turin ARK fingerprint: `1f084161a44bb6d93778a904877d4819cafa5d05ef4193b2ded9dd9c73dd3f6a` (unchanged)
-- BitcoinPIR commit currently vendored: see `vendor/SOURCE_COMMIT.txt` (now `48c6f88b`)
+- BitcoinPIR commit currently vendored: see `vendor/SOURCE_COMMIT.txt` (now `c322e825`)
