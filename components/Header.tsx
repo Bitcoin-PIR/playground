@@ -3,6 +3,7 @@ import Link from 'next/link';
 const NAV = [
   { href: '/playground', label: 'Playground' },
   { href: '/explorer', label: 'Wire explorer' },
+  { href: '/rate-limiting', label: 'Rate limiting' },
   { href: '/docs', label: 'Docs' },
 ];
 

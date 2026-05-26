@@ -51,7 +51,8 @@ for f in \
   codec.ts hash.ts merkle.ts pbc.ts scan.ts ws.ts \
   server-info.ts protocol.ts leakage.ts attest-pin.ts \
   types.ts harmony-types.ts harmonypir_hint_db.ts \
-  constants.ts polyfills.ts; do
+  constants.ts polyfills.ts \
+  payment-client.ts cashu-bat.ts credential-manager.ts arc-present.ts; do
   if [ -f "$WEB_SRC/$f" ]; then
     cp "$WEB_SRC/$f" "$WEB_DST/$f"
   else

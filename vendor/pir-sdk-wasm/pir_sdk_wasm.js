@@ -681,6 +681,62 @@ export class WasmAnnounceVerification {
         }
     }
     /**
+     * Bind the bundle to the encrypted session: verify that the
+     * manifest's `channelPub` equals the X25519 key the channel
+     * actually handshook against. Pass the *attested* key — i.e.
+     * `attestVerification.serverStaticPub`, which the SEV-SNP report /
+     * VCEK chain already vouches for. Throws on mismatch (the bundle
+     * describes a different channel than the live session) or on a
+     * non-32-byte argument. Mirrors the Rust
+     * `AnnounceVerification::check_channel_binding` so web and native
+     * share one implementation and error message.
+     * @param {Uint8Array} expected_channel_pub
+     */
+    checkChannelBinding(expected_channel_pub) {
+        const ptr0 = passArray8ToWasm0(expected_channel_pub, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmannounceverification_checkChannelBinding(this.__wbg_ptr, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Replay / staleness guard on `manifest.issued_at`. Throws if the
+     * bundle is older than `maxAgeSeconds` before `nowUnixSeconds`
+     * (stale) or more than 300s after it (future-dated). NOTE:
+     * `issued_at` is the server's boot time, so pick `maxAgeSeconds`
+     * generously (≥ expected uptime); pass `0n` to skip the staleness
+     * arm, or `nowUnixSeconds === 0n` to skip entirely. Mirrors the Rust
+     * `AnnounceVerification::check_freshness`.
+     * @param {bigint} now_unix_seconds
+     * @param {bigint} max_age_seconds
+     */
+    checkFreshness(now_unix_seconds, max_age_seconds) {
+        const ret = wasm.wasmannounceverification_checkFreshness(this.__wbg_ptr, now_unix_seconds, max_age_seconds);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * Verify the bundle against a pinned operator pubkey: operator
+     * pubkey match + the cert's operator **signature** (`cert.verify()`)
+     * + validity window (skipped when `nowUnixSeconds == 0`) + the
+     * in-bundle chain check. Throws on any failure or a non-32-byte
+     * argument. A bare `operatorPubkeyHex` string-compare would miss
+     * the signature check, so use this. Mirrors the Rust
+     * `AnnounceVerification::check_pinned_operator`.
+     * @param {Uint8Array} pinned_operator_pubkey
+     * @param {bigint} now_unix_seconds
+     */
+    checkPinnedOperator(pinned_operator_pubkey, now_unix_seconds) {
+        const ptr0 = passArray8ToWasm0(pinned_operator_pubkey, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmannounceverification_checkPinnedOperator(this.__wbg_ptr, ptr0, len0, now_unix_seconds);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
      * Server-self-reported git rev (string).
      * @returns {string}
      */
@@ -774,6 +830,92 @@ export class WasmAnnounceVerification {
     }
 }
 if (Symbol.dispose) WasmAnnounceVerification.prototype[Symbol.dispose] = WasmAnnounceVerification.prototype.free;
+
+/**
+ * Opaque handle for the client side of ARC issuance ("obtain" leg).
+ *
+ * Holds the per-request `ClientSecrets` (the blinding factors) **inside
+ * WASM** so they never cross into JS, alongside the `CredentialRequest`.
+ * Lifecycle:
+ *
+ * 1. `new(request_context)` — build a blinded request (fresh `m1`, etc.).
+ * 2. `request_bytes()` — 226-byte body to POST to the issuer
+ *    (`/dev/arc/issue`).
+ * 3. `finalize(pubkey, response)` — combine the issuer's 454-byte response
+ *    with the held secrets into a 131-byte credential, ready for
+ *    [`WasmArcPresentationState::new`].
+ *
+ * `request_context` MUST match the value the verifier expects
+ * (`pir_runtime_core::arc_verifier::DEFAULT_REQUEST_CONTEXT` =
+ * `b"bitcoin-pir-v1"`); the issuer's `m2` is re-derived from it at
+ * presentation time.
+ */
+export class WasmArcCredentialRequest {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WasmArcCredentialRequestFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_wasmarccredentialrequest_free(ptr, 0);
+    }
+    /**
+     * Finalize: combine the issuer's response with the held secrets.
+     *
+     * `pubkey_bytes`: 99-byte issuer `ServerPublicKey` (from
+     * `GET /dev/arc/pubkey`).
+     * `response_bytes`: 454-byte `CredentialResponse` (from
+     * `POST /dev/arc/issue`).
+     *
+     * Returns the 131-byte credential blob for
+     * [`WasmArcPresentationState::new`]. Throws if the response proof is
+     * invalid (e.g. wrong issuer key).
+     * @param {Uint8Array} pubkey_bytes
+     * @param {Uint8Array} response_bytes
+     * @returns {Uint8Array}
+     */
+    finalize(pubkey_bytes, response_bytes) {
+        const ptr0 = passArray8ToWasm0(pubkey_bytes, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(response_bytes, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmarccredentialrequest_finalize(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+    /**
+     * Build a fresh blinded credential request for `request_context`.
+     * @param {Uint8Array} request_context
+     */
+    constructor(request_context) {
+        const ptr0 = passArray8ToWasm0(request_context, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmarccredentialrequest_new(ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        this.__wbg_ptr = ret[0] >>> 0;
+        WasmArcCredentialRequestFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * The 226-byte `CredentialRequest` to POST to the issuer.
+     * @returns {Uint8Array}
+     */
+    request_bytes() {
+        const ret = wasm.wasmarccredentialrequest_request_bytes(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+}
+if (Symbol.dispose) WasmArcCredentialRequest.prototype[Symbol.dispose] = WasmArcCredentialRequest.prototype.free;
 
 /**
  * Opaque handle wrapping an ARC `PresentationState` + `Credential`.
@@ -1366,6 +1508,92 @@ export class WasmBucketMerkleTreeTops {
     }
 }
 if (Symbol.dispose) WasmBucketMerkleTreeTops.prototype[Symbol.dispose] = WasmBucketMerkleTreeTops.prototype.free;
+
+/**
+ * One in-flight Cashu blind/unblind. Holds the blinding scalar `r` and the
+ * secret **inside WASM** so neither crosses into JS until the BAT is
+ * assembled. Create one per BAT you want to mint.
+ *
+ * Flow (one BAT):
+ * 1. `new()` — pick a fresh secret + `r`, compute `B' = Y + r·G`.
+ * 2. `blinded_message()` — 33-byte `B'` to POST to the mint.
+ * 3. `unblind(keyset_pubkey, signature)` — combine the mint's 33-byte `C'`
+ *    into the unblinded 33-byte `C`.
+ * 4. wrap `{ secret_string(), hex(C) }` (+ keyset id) into a `Bat`.
+ */
+export class WasmCashuBlind {
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WasmCashuBlindFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_wasmcashublind_free(ptr, 0);
+    }
+    /**
+     * The 33-byte blinded message `B'` to POST to the mint
+     * (`/dev/cashu/mint`).
+     * @returns {Uint8Array}
+     */
+    blinded_message() {
+        const ret = wasm.wasmcashublind_blinded_message(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * Pick a fresh random secret + blinding factor and compute `B'`.
+     */
+    constructor() {
+        const ret = wasm.wasmcashublind_new();
+        this.__wbg_ptr = ret >>> 0;
+        WasmCashuBlindFinalization.register(this, this.__wbg_ptr, this);
+        return this;
+    }
+    /**
+     * The Cashu "secret" string (64-char hex) for the `authA` token.
+     * @returns {string}
+     */
+    secret_string() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.wasmcashublind_secret_string(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Unblind the mint's 33-byte `C'` with the keyset public key `K`
+     * (33 bytes): `C = C' − r·K`. Returns the 33-byte unblinded signature
+     * `C` (hex-encode it for the token's `C` field).
+     *
+     * Throws on a malformed point. (`C` verifies as `C == k·hash_to_curve
+     * (secret)` on the server.)
+     * @param {Uint8Array} keyset_pubkey
+     * @param {Uint8Array} signature
+     * @returns {Uint8Array}
+     */
+    unblind(keyset_pubkey, signature) {
+        const ptr0 = passArray8ToWasm0(keyset_pubkey, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray8ToWasm0(signature, wasm.__wbindgen_malloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmcashublind_unblind(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v3;
+    }
+}
+if (Symbol.dispose) WasmCashuBlind.prototype[Symbol.dispose] = WasmCashuBlind.prototype.free;
 
 /**
  * WASM wrapper for DatabaseCatalog.
@@ -3074,6 +3302,32 @@ export function turinArkFingerprint() {
 }
 
 /**
+ * Parse + verify a raw RESP_ANNOUNCE wire payload (the response frame
+ * starting at the variant byte) into a [`WasmAnnounceVerification`],
+ * running the in-bundle chain check. Throws on a wire-format violation
+ * or a server `RESP_ERROR` envelope (e.g. "announce not configured").
+ *
+ * This is for transports that don't go through `WasmDpfClient` — the
+ * standalone TS `OnionPirWebClient` does its own REQ_ANNOUNCE
+ * round-trip over its WebSocket and hands the response bytes here, so
+ * it reuses the exact same Rust parsing + chain verification (and the
+ * `checkPinnedOperator` / `checkChannelBinding` methods on the result)
+ * instead of reimplementing Ed25519 verification in TS. Mirrors the
+ * Rust `pir_sdk_client::announce::parse_announce_response`.
+ * @param {Uint8Array} resp_payload
+ * @returns {WasmAnnounceVerification}
+ */
+export function verifyAnnounceResponse(resp_payload) {
+    const ptr0 = passArray8ToWasm0(resp_payload, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.verifyAnnounceResponse(ptr0, len0);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return WasmAnnounceVerification.__wrap(ret[0]);
+}
+
+/**
  * Walk one bin-Merkle proof from leaf to root.
  *
  * `sibling_rows_flat` must carry `cache_from_level × BUCKET_MERKLE_SIB_ROW_SIZE`
@@ -3606,22 +3860,22 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 283, function: Function { arguments: [Externref], shim_idx: 284, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 300, function: Function { arguments: [Externref], shim_idx: 301, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h490263039c0c107c, wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 406, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 407, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 423, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 424, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h0ce9efb4136d99f9, wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 406, function: Function { arguments: [NamedExternref("Event")], shim_idx: 407, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 423, function: Function { arguments: [NamedExternref("Event")], shim_idx: 424, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h0ce9efb4136d99f9, wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_2);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 406, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 407, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 423, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 424, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h0ce9efb4136d99f9, wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_3);
             return ret;
         },
@@ -3706,6 +3960,9 @@ const HarmonyRequestPairFinalization = (typeof FinalizationRegistry === 'undefin
 const WasmAnnounceVerificationFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmannounceverification_free(ptr >>> 0, 1));
+const WasmArcCredentialRequestFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_wasmarccredentialrequest_free(ptr >>> 0, 1));
 const WasmArcPresentationStateFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmarcpresentationstate_free(ptr >>> 0, 1));
@@ -3718,6 +3975,9 @@ const WasmAttestVerificationFinalization = (typeof FinalizationRegistry === 'und
 const WasmBucketMerkleTreeTopsFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmbucketmerkletreetops_free(ptr >>> 0, 1));
+const WasmCashuBlindFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_wasmcashublind_free(ptr >>> 0, 1));
 const WasmDatabaseCatalogFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmdatabasecatalog_free(ptr >>> 0, 1));

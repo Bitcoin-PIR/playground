@@ -293,6 +293,38 @@ export class WasmAnnounceVerification {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Bind the bundle to the encrypted session: verify that the
+     * manifest's `channelPub` equals the X25519 key the channel
+     * actually handshook against. Pass the *attested* key — i.e.
+     * `attestVerification.serverStaticPub`, which the SEV-SNP report /
+     * VCEK chain already vouches for. Throws on mismatch (the bundle
+     * describes a different channel than the live session) or on a
+     * non-32-byte argument. Mirrors the Rust
+     * `AnnounceVerification::check_channel_binding` so web and native
+     * share one implementation and error message.
+     */
+    checkChannelBinding(expected_channel_pub: Uint8Array): void;
+    /**
+     * Replay / staleness guard on `manifest.issued_at`. Throws if the
+     * bundle is older than `maxAgeSeconds` before `nowUnixSeconds`
+     * (stale) or more than 300s after it (future-dated). NOTE:
+     * `issued_at` is the server's boot time, so pick `maxAgeSeconds`
+     * generously (≥ expected uptime); pass `0n` to skip the staleness
+     * arm, or `nowUnixSeconds === 0n` to skip entirely. Mirrors the Rust
+     * `AnnounceVerification::check_freshness`.
+     */
+    checkFreshness(now_unix_seconds: bigint, max_age_seconds: bigint): void;
+    /**
+     * Verify the bundle against a pinned operator pubkey: operator
+     * pubkey match + the cert's operator **signature** (`cert.verify()`)
+     * + validity window (skipped when `nowUnixSeconds == 0`) + the
+     * in-bundle chain check. Throws on any failure or a non-32-byte
+     * argument. A bare `operatorPubkeyHex` string-compare would miss
+     * the signature check, so use this. Mirrors the Rust
+     * `AnnounceVerification::check_pinned_operator`.
+     */
+    checkPinnedOperator(pinned_operator_pubkey: Uint8Array, now_unix_seconds: bigint): void;
+    /**
      * Hex-encoded binary SHA-256 the manifest claims (self-reported,
      * trustworthy iff the chain check passed).
      */
@@ -352,6 +384,51 @@ export class WasmAnnounceVerification {
      * Cert validity upper bound (unix-seconds). 0 = indefinite.
      */
     readonly validUntil: bigint;
+}
+
+/**
+ * Opaque handle for the client side of ARC issuance ("obtain" leg).
+ *
+ * Holds the per-request `ClientSecrets` (the blinding factors) **inside
+ * WASM** so they never cross into JS, alongside the `CredentialRequest`.
+ * Lifecycle:
+ *
+ * 1. `new(request_context)` — build a blinded request (fresh `m1`, etc.).
+ * 2. `request_bytes()` — 226-byte body to POST to the issuer
+ *    (`/dev/arc/issue`).
+ * 3. `finalize(pubkey, response)` — combine the issuer's 454-byte response
+ *    with the held secrets into a 131-byte credential, ready for
+ *    [`WasmArcPresentationState::new`].
+ *
+ * `request_context` MUST match the value the verifier expects
+ * (`pir_runtime_core::arc_verifier::DEFAULT_REQUEST_CONTEXT` =
+ * `b"bitcoin-pir-v1"`); the issuer's `m2` is re-derived from it at
+ * presentation time.
+ */
+export class WasmArcCredentialRequest {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Finalize: combine the issuer's response with the held secrets.
+     *
+     * `pubkey_bytes`: 99-byte issuer `ServerPublicKey` (from
+     * `GET /dev/arc/pubkey`).
+     * `response_bytes`: 454-byte `CredentialResponse` (from
+     * `POST /dev/arc/issue`).
+     *
+     * Returns the 131-byte credential blob for
+     * [`WasmArcPresentationState::new`]. Throws if the response proof is
+     * invalid (e.g. wrong issuer key).
+     */
+    finalize(pubkey_bytes: Uint8Array, response_bytes: Uint8Array): Uint8Array;
+    /**
+     * Build a fresh blinded credential request for `request_context`.
+     */
+    constructor(request_context: Uint8Array);
+    /**
+     * The 226-byte `CredentialRequest` to POST to the issuer.
+     */
+    request_bytes(): Uint8Array;
 }
 
 /**
@@ -672,6 +749,45 @@ export class WasmBucketMerkleTreeTops {
      * emits INDEX trees `[0..K)` followed by CHUNK trees `[K..K+K_CHUNK)`).
      */
     readonly treeCount: number;
+}
+
+/**
+ * One in-flight Cashu blind/unblind. Holds the blinding scalar `r` and the
+ * secret **inside WASM** so neither crosses into JS until the BAT is
+ * assembled. Create one per BAT you want to mint.
+ *
+ * Flow (one BAT):
+ * 1. `new()` — pick a fresh secret + `r`, compute `B' = Y + r·G`.
+ * 2. `blinded_message()` — 33-byte `B'` to POST to the mint.
+ * 3. `unblind(keyset_pubkey, signature)` — combine the mint's 33-byte `C'`
+ *    into the unblinded 33-byte `C`.
+ * 4. wrap `{ secret_string(), hex(C) }` (+ keyset id) into a `Bat`.
+ */
+export class WasmCashuBlind {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * The 33-byte blinded message `B'` to POST to the mint
+     * (`/dev/cashu/mint`).
+     */
+    blinded_message(): Uint8Array;
+    /**
+     * Pick a fresh random secret + blinding factor and compute `B'`.
+     */
+    constructor();
+    /**
+     * The Cashu "secret" string (64-char hex) for the `authA` token.
+     */
+    secret_string(): string;
+    /**
+     * Unblind the mint's 33-byte `C'` with the keyset public key `K`
+     * (33 bytes): `C = C' − r·K`. Returns the 33-byte unblinded signature
+     * `C` (hex-encode it for the token's `C` field).
+     *
+     * Throws on a malformed point. (`C` verifies as `C == k·hash_to_curve
+     * (secret)` on the server.)
+     */
+    unblind(keyset_pubkey: Uint8Array, signature: Uint8Array): Uint8Array;
 }
 
 /**
@@ -1671,6 +1787,22 @@ export function splitmix64(x_hi: number, x_lo: number): Uint8Array;
 export function turinArkFingerprint(): Uint8Array;
 
 /**
+ * Parse + verify a raw RESP_ANNOUNCE wire payload (the response frame
+ * starting at the variant byte) into a [`WasmAnnounceVerification`],
+ * running the in-bundle chain check. Throws on a wire-format violation
+ * or a server `RESP_ERROR` envelope (e.g. "announce not configured").
+ *
+ * This is for transports that don't go through `WasmDpfClient` — the
+ * standalone TS `OnionPirWebClient` does its own REQ_ANNOUNCE
+ * round-trip over its WebSocket and hands the response bytes here, so
+ * it reuses the exact same Rust parsing + chain verification (and the
+ * `checkPinnedOperator` / `checkChannelBinding` methods on the result)
+ * instead of reimplementing Ed25519 verification in TS. Mirrors the
+ * Rust `pir_sdk_client::announce::parse_announce_response`.
+ */
+export function verifyAnnounceResponse(resp_payload: Uint8Array): WasmAnnounceVerification;
+
+/**
  * Walk one bin-Merkle proof from leaf to root.
  *
  * `sibling_rows_flat` must carry `cache_from_level × BUCKET_MERKLE_SIB_ROW_SIZE`
@@ -1716,10 +1848,12 @@ export interface InitOutput {
     readonly PRP_FASTPRP: () => number;
     readonly PRP_HMR12: () => number;
     readonly __wbg_wasmannounceverification_free: (a: number, b: number) => void;
+    readonly __wbg_wasmarccredentialrequest_free: (a: number, b: number) => void;
     readonly __wbg_wasmarcpresentationstate_free: (a: number, b: number) => void;
     readonly __wbg_wasmatomicmetrics_free: (a: number, b: number) => void;
     readonly __wbg_wasmattestverification_free: (a: number, b: number) => void;
     readonly __wbg_wasmbucketmerkletreetops_free: (a: number, b: number) => void;
+    readonly __wbg_wasmcashublind_free: (a: number, b: number) => void;
     readonly __wbg_wasmdatabasecatalog_free: (a: number, b: number) => void;
     readonly __wbg_wasmdpfclient_free: (a: number, b: number) => void;
     readonly __wbg_wasmharmonyclient_free: (a: number, b: number) => void;
@@ -1745,12 +1879,16 @@ export interface InitOutput {
     readonly planRounds: (a: number, b: number, c: number, d: number, e: number, f: number) => any;
     readonly readVarint: (a: number, b: number, c: number) => [number, number];
     readonly splitmix64: (a: number, b: number) => [number, number];
+    readonly verifyAnnounceResponse: (a: number, b: number) => [number, number, number];
     readonly verifyBucketMerkleItem: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
     readonly wasmannounceverification_binarySha256Hex: (a: number) => [number, number];
     readonly wasmannounceverification_chainError: (a: number) => [number, number];
     readonly wasmannounceverification_chainVerified: (a: number) => number;
     readonly wasmannounceverification_channelPub: (a: number) => any;
     readonly wasmannounceverification_channelPubHex: (a: number) => [number, number];
+    readonly wasmannounceverification_checkChannelBinding: (a: number, b: number, c: number) => [number, number];
+    readonly wasmannounceverification_checkFreshness: (a: number, b: bigint, c: bigint) => [number, number];
+    readonly wasmannounceverification_checkPinnedOperator: (a: number, b: number, c: number, d: bigint) => [number, number];
     readonly wasmannounceverification_gitRev: (a: number) => [number, number];
     readonly wasmannounceverification_identityPubkeyHex: (a: number) => [number, number];
     readonly wasmannounceverification_issuedAt: (a: number) => bigint;
@@ -1758,6 +1896,9 @@ export interface InitOutput {
     readonly wasmannounceverification_serverId: (a: number) => [number, number];
     readonly wasmannounceverification_validFrom: (a: number) => bigint;
     readonly wasmannounceverification_validUntil: (a: number) => bigint;
+    readonly wasmarccredentialrequest_finalize: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly wasmarccredentialrequest_new: (a: number, b: number) => [number, number, number];
+    readonly wasmarccredentialrequest_request_bytes: (a: number) => [number, number];
     readonly wasmarcpresentationstate_deserialize: (a: number, b: number) => [number, number, number];
     readonly wasmarcpresentationstate_limit: (a: number) => bigint;
     readonly wasmarcpresentationstate_new: (a: number, b: number, c: number, d: number, e: bigint) => [number, number, number];
@@ -1786,6 +1927,10 @@ export interface InitOutput {
     readonly wasmbucketmerkletreetops_fromBytes: (a: number, b: number) => [number, number, number];
     readonly wasmbucketmerkletreetops_root: (a: number, b: number) => [number, number];
     readonly wasmbucketmerkletreetops_treeCount: (a: number) => number;
+    readonly wasmcashublind_blinded_message: (a: number) => [number, number];
+    readonly wasmcashublind_new: () => number;
+    readonly wasmcashublind_secret_string: (a: number) => [number, number];
+    readonly wasmcashublind_unblind: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly wasmdatabasecatalog_count: (a: number) => number;
     readonly wasmdatabasecatalog_fromJson: (a: any) => [number, number, number];
     readonly wasmdatabasecatalog_getDatabase: (a: number, b: number) => any;
