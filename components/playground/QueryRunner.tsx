@@ -4,11 +4,10 @@ import { useCallback, useState } from 'react';
 import { BackendSelector, type Backend } from '@/components/BackendSelector';
 import { AddressInput } from './AddressInput';
 import { ResultPanel } from './ResultPanel';
-import { CodeSnippet } from './CodeSnippet';
+import { EditableRunner } from './EditableRunner';
 import { QuickStartCard } from './QuickStartCard';
 import { parseAddress } from '@/lib/address';
 import { runQuery, type PlaygroundQueryResult } from '@/lib/playground-clients';
-import { buildSnippet } from '@/lib/snippet';
 
 export function QueryRunner() {
   const [backend, setBackend] = useState<Backend>('dpf');
@@ -95,9 +94,9 @@ export function QueryRunner() {
 
         <div className="space-y-4">
           <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
-            What your wallet would write
+            Edit &amp; run the SDK code
           </h2>
-          <CodeSnippet code={buildSnippet(backend, address)} />
+          <EditableRunner backend={backend} address={address} />
           <QuickStartCard />
         </div>
       </div>

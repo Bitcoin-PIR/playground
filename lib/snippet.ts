@@ -49,6 +49,11 @@ if (att1.launchMeasurementHex !== PIR2_TIER3_PIN.measurementHex) {
 att1.verifyVcekChain(AMD_TURIN_ARK_FINGERPRINT);  // AMD chain
 await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);
 
+// Warm the database catalog — queryBatchRaw resolves db_id against the
+// native-side catalog state, so fetch it once after connecting.
+const catalog = await client.fetchCatalog();
+catalog.free?.();
+
 // Address -> scripthash (HASH160 of scriptPubKey).
 const spkHex = addressToScriptPubKey('__ADDRESS__')!;
 const sh = scriptHash(hexToBytes(spkHex));  // 20 bytes
@@ -77,6 +82,7 @@ for (let i = 0; i < result.entryCount; i++) {
 }
 
 await client.disconnect();
+client.free();  // release the wasm client + its WebSocket callbacks
 `;
 
 const HARMONY_SNIPPET = `// HarmonyPIR — two servers + offline hint phase, optimised for bigger
@@ -135,6 +141,7 @@ for (let i = 0; i < result.entryCount; i++) {
 }
 
 await client.disconnect();
+client.free();  // release the wasm client + its WebSocket callbacks
 `;
 
 const ONION_SNIPPET = `// OnionPIR — single-server FHE backend.  SEAL doesn’t compile to

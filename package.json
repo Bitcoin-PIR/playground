@@ -10,7 +10,10 @@
     "url": "https://github.com/Bitcoin-PIR/playground"
   },
   "scripts": {
+    "copy-monaco": "node scripts/copy-monaco.mjs",
+    "predev": "npm run copy-monaco",
     "dev": "next dev",
+    "prebuild": "npm run copy-monaco",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -18,18 +21,21 @@
     "sync-vendor": "bash scripts/sync-vendor.sh"
   },
   "dependencies": {
+    "@mdx-js/loader": "^3.0.1",
+    "@mdx-js/react": "^3.0.1",
+    "@monaco-editor/react": "^4.7.0",
+    "@next/mdx": "^14.2.0",
+    "@types/mdx": "^2.0.13",
+    "buffer": "^6.0.3",
+    "hash.js": "^1.1.7",
+    "monaco-editor": "^0.55.1",
     "next": "^14.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "@next/mdx": "^14.2.0",
-    "@mdx-js/loader": "^3.0.1",
-    "@mdx-js/react": "^3.0.1",
-    "@types/mdx": "^2.0.13",
     "rehype-pretty-code": "^0.13.2",
     "remark-gfm": "^4.0.0",
     "shiki": "^1.10.0",
-    "buffer": "^6.0.3",
-    "hash.js": "^1.1.7"
+    "sucrase": "^3.35.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

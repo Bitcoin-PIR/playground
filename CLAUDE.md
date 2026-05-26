@@ -43,7 +43,8 @@ app/                      Next.js App Router pages
 components/
   Header.tsx, Footer.tsx, BackendSelector.tsx     shared
   playground/             AddressInput, QueryRunner, ResultPanel,
-                          CodeSnippet, AttestationBadge, QuickStartCard
+                          EditableRunner, CodeEditor (Monaco), AttestationBadge,
+                          QuickStartCard
   explorer/               FrameTimeline, InvariantStatus, PaddingViz,
                           MerkleCountChart, FoundVsNotFoundDiff,
                           HarmonyTCheck
@@ -57,9 +58,15 @@ lib/
   wasm-loader.ts          one-shot dynamic-import of pir-sdk-wasm
   endpoints.ts            PIR1_URL = wss://weikeng1, PIR2_URL = wss://weikeng2
   address.ts              parseAddress() → {spk, sh160, scriptType}
-  snippet.ts              per-backend TS snippet generator
+  snippet.ts              per-backend TS snippet generator (seeds the editable
+                          runner — must stay RUNNABLE, not just illustrative)
   playground-clients.ts   runDpfQuery, runHarmonyQuery, runOnionPirQuery,
                           ensureOnionWasmFactory (exported)
+  runner/                 in-browser editable code runner (see Recent history)
+    module-map.ts         require() shim → same live SDK bindings as above
+    run-user-code.ts      Sucrase transpile + new Function execute (in-browser)
+    safety-lint.ts        non-blocking attest/Merkle heuristic warnings
+    ambient-dts.ts        Monaco IntelliSense lib for the SDK modules
   explorer/
     frame-tap.ts          window.WebSocket monkey-patch + opcode classifier
     invariants.ts         5-invariant report; APPLICABLE map per backend
@@ -73,11 +80,14 @@ vendor/
                           BitcoinPIR/web/src/
 public/
   CNAME                   sdk.bitcoinpir.org (binds Pages custom domain)
+  monaco/                 GITIGNORED — Monaco vs assets copied from node_modules
+                          by scripts/copy-monaco.mjs on predev/prebuild
   wasm/
     onionpir_client.mjs   OnionPIR FHE runtime (hand-rolled, SEAL doesn't
     onionpir_client.wasm  compile to wasm32)
 scripts/
   sync-vendor.sh          BITCOINPIR_REPO=... npm run sync-vendor
+  copy-monaco.mjs         self-host Monaco vs → public/monaco (predev/prebuild)
 .github/workflows/
   ci.yml                  typecheck + lint + build on push/PR
   pages.yml               static-export build → upload-pages-artifact → deploy
@@ -154,6 +164,7 @@ npm run lint                    # next lint
 npm run build                   # dev build (with basePath / SSR / etc as configured)
 GITHUB_PAGES=1 npm run build    # production static export → out/
 npm run sync-vendor             # resync vendor/ from $BITCOINPIR_REPO
+npm run copy-monaco             # self-host Monaco assets (auto on predev/prebuild)
 ```
 
 `out/` is `.gitignored`. CI workflow runs typecheck + lint + build. Pages workflow runs `GITHUB_PAGES=1 npm run build` then ships `out/` (including `out/CNAME`).
@@ -161,6 +172,17 @@ npm run sync-vendor             # resync vendor/ from $BITCOINPIR_REPO
 Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
+
+## Recent history (2026-05-26) — editable in-browser code runner
+
+The playground's right-hand panel went from a **read-only snippet** to an **editable, fully in-browser TypeScript runner** ("Edit & run the SDK code"):
+- **What:** Monaco editor (`components/playground/{EditableRunner,CodeEditor}.tsx`) seeded from `lib/snippet.ts`, with a Run button + captured-console output panel. `lib/runner/` does the work: Sucrase strips types + rewrites imports to `require()`, then `new Function` runs it in an async IIFE with a `require` shim (`module-map.ts`) bound to the **same live SDK bindings `playground-clients.ts` uses** — so the editable path can't silently diverge from the structured one.
+- **In-browser, no server:** transpile + execute are client-side; the only network call is the PIR query's WebSocket (already true before). Nothing is sent anywhere to compile/eval.
+- **Safety = surface, not enforce** (matches "no invariant-violating controls"): the whole snippet is editable, but `safety-lint.ts` shows a **non-blocking** amber banner if `verifyMerkleBatch` / `attest` / `upgradeToSecureChannel` go missing.
+- **Monaco self-hosted** (no CDN): `scripts/copy-monaco.mjs` copies `min/vs` → `public/monaco` on `predev`/`prebuild`; `public/monaco` is gitignored. Loaded lazily (`next/dynamic ssr:false`) so `/playground` First Load JS barely moves. Deps added: `@monaco-editor/react`, `monaco-editor`, `sucrase`.
+- **Snippet fixes surfaced by actually running them:** the DPF snippet was missing `await client.fetchCatalog()` (threw `invalid state: no catalog`); added it + `client.free()` on both wasm snippets to match `runDpfQuery`'s lifecycle.
+- **Verified live** in-browser against production: DPF (`1Q2TWHE3…` → 1,284 sats, ~9 s) and OnionPIR (same address, ~57 s, FHE) both return correct UTXOs with Merkle passing; lint banner appears + stays non-blocking. `typecheck` / `lint` / static-export build all green.
+- **Known wart (pre-existing, NOT from this change):** see "upstream wasm WS-teardown error" in Open follow-ups.
 
 ## Recent history (2026-05-26)
 
@@ -215,6 +237,7 @@ Migrated from `bitcoin-pir.github.io/playground/` → `sdk.bitcoinpir.org`:
 
 ## Open follow-ups (next session candidates)
 
+- **Upstream wasm WS-teardown error** — every DPF/HarmonyPIR query (the structured "Run query" **and** the editable runner) triggers a benign unhandled `closure invoked recursively or after being dropped` from `vendor/pir-sdk-wasm/pir_sdk_wasm.js` during WebSocket teardown. It fires *after* correct results return, is **dev-overlay-only** (no overlay in the static export → users never see it), and `client.free()` does **not** suppress it. Per "don't edit vendor", the fix belongs upstream in `Bitcoin-PIR/Bitcoin-PIR`'s `pir-sdk-wasm` WS teardown (a closure held by the WS `onclose`/`onmessage` handler is invoked post-drop), then resync vendor here. Repro: run any DPF query and watch the `next dev` error overlay.
 - **Operator-identity "verified operator" badge** — the v22 vendor sync (2026-05-25) pulled in the operator-signed-identity announce client (`dpf-adapter.ts` config `verifyOperatorIdentity` + `adapter.operatorIdentity.serverN`) and the `PIR_OPERATOR_PUBKEY` pin, but the UI doesn't use them. **Double-blocked, do not wire yet:** (1) the vendored `pir-sdk-wasm` predates the announce verifier (lacks `checkPinnedOperator`/`checkChannelBinding`/`verifyAnnounceResponse`) — needs a `wasm-pack build` + resync; (2) the servers don't dispatch `REQ_ANNOUNCE` yet (`0x07-unsupported`), so the state can never reach `'verified'`. When both clear: gate the badge **only** on `operatorIdentity.serverN.state === 'verified'` (never `chainVerified` alone — a MITM can self-sign a consistent bundle). Full spec in the original `ANNOUNCE_V22_HANDOFF.md` (Task 2) + main repo `docs/OPERATOR_IDENTITY.md`.
 - **Electrum plugin wire-parser audit** — Bitcoin-PIR/Bitcoin-PIR PR #7 changed the client-side wire-parsing contract (1 WS message no longer == 1 record; demux buffer required). The Electrum plugin has its own Python parser; verify it handles batched messages before flipping any other clients.
 - **OnionPIR multi-query batches** — invariant 5 (INDEX Merkle Group-Symmetry) shows as `n/a` on single-query OnionPIR traces because the trace lacks the multi-query structure. The `lib/explorer/invariants.ts` notes this. A future "batch query" UI would let users empirically check it.
@@ -231,6 +254,7 @@ Migrated from `bitcoin-pir.github.io/playground/` → `sdk.bitcoinpir.org`:
 - **Don't hardcode `/playground` anywhere.** Custom domain is at root. Use `process.env.NEXT_PUBLIC_BASE_PATH` (always `''`) if you need a base.
 - **Don't push to main without typecheck + build passing.** The CI workflow catches it but you'll get a failed Pages deploy.
 - **Don't add `next dev` cache to .git** (it's `.gitignored`; if Next.js writes a new state file, add it there).
+- **Don't commit `public/monaco`.** It's gitignored and regenerated from `node_modules` by `scripts/copy-monaco.mjs` on `predev`/`prebuild` (~15 MB of Monaco `vs` assets).
 
 ---
 
