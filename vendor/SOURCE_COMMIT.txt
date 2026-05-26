@@ -1,1 +1,1 @@
-BitcoinPIR @ cf7a154f86975d57eb21aabd7c05f0f40eed9532
+BitcoinPIR @ c0daf855790532ad49ba841107ee182b3ceec746  (main; PR #15 — wasm WS-teardown fix, commit ae5144be4f032230171a3113786ea5ff2812913b)

@@ -173,6 +173,14 @@ Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
 
+## Recent history (2026-05-27) — wasm WS-teardown fix vendored
+
+Re-vendored `pir-sdk-wasm` to pick up the upstream **WebSocket-teardown fix** the editable runner surfaced (BitcoinPIR `main @ c0daf855`, PR #15; fix commit `ae5144be`):
+- **Bug:** every DPF/HarmonyPIR query threw an unhandled `closure invoked recursively or after being dropped` during WS teardown — dev-overlay-only (no overlay in the static export), results always correct, and it reproduced on the original "Run query" path too (not introduced by the runner). Root cause = **drop-before-detach** in `pir-sdk-client/src/wasm_transport.rs` (`WasmWebSocketTransport`): `close()` dropped the WS `Closure`s without first clearing `set_onclose`/`onmessage`/`onerror`/`onopen`, and there was no `Drop` impl — so the browser's next-tick `close` event invoked a freed closure. That's also why `client.free()` after `disconnect()` didn't suppress it.
+- **Fix (upstream, wasm32-only, no wire/protocol/server change):** an idempotent `detach_ws_handlers(ws)` (all four handlers → `None`) called BEFORE `ws.close()` and before dropping the closures, plus an `impl Drop` covering the `free()`/drop path.
+- **Vendor diff:** only `pir_sdk_wasm_bg.wasm` changed (+81 bytes); `.js` glue, `.d.ts`, and all `bitcoinpir-web` TS byte-identical. `SOURCE_COMMIT.txt` → `c0daf855`. **Server pins unchanged** (client-only fix — no redeploy).
+- **Verified live** in-browser against production: DPF + HarmonyPIR both return correct UTXOs (1,284 sats, Merkle passing) and the teardown throw is **gone** on both (no dev overlay, clean console). Coordinated with the BitcoinPIR repo agent via agent-mailbox.
+
 ## Recent history (2026-05-26) — editable in-browser code runner
 
 The playground's right-hand panel went from a **read-only snippet** to an **editable, fully in-browser TypeScript runner** ("Edit & run the SDK code"):
@@ -182,7 +190,7 @@ The playground's right-hand panel went from a **read-only snippet** to an **edit
 - **Monaco self-hosted** (no CDN): `scripts/copy-monaco.mjs` copies `min/vs` → `public/monaco` on `predev`/`prebuild`; `public/monaco` is gitignored. Loaded lazily (`next/dynamic ssr:false`) so `/playground` First Load JS barely moves. Deps added: `@monaco-editor/react`, `monaco-editor`, `sucrase`.
 - **Snippet fixes surfaced by actually running them:** the DPF snippet was missing `await client.fetchCatalog()` (threw `invalid state: no catalog`); added it + `client.free()` on both wasm snippets to match `runDpfQuery`'s lifecycle.
 - **Verified live** in-browser against production: DPF (`1Q2TWHE3…` → 1,284 sats, ~9 s) and OnionPIR (same address, ~57 s, FHE) both return correct UTXOs with Merkle passing; lint banner appears + stays non-blocking. `typecheck` / `lint` / static-export build all green.
-- **Known wart (pre-existing, NOT from this change):** see "upstream wasm WS-teardown error" in Open follow-ups.
+- **Known wart (pre-existing, NOT from this change) — since FIXED:** the wasm WS-teardown error this surfaced was fixed upstream + re-vendored the next day (see the 2026-05-27 entry above).
 
 ## Recent history (2026-05-26)
 
@@ -237,7 +245,6 @@ Migrated from `bitcoin-pir.github.io/playground/` → `sdk.bitcoinpir.org`:
 
 ## Open follow-ups (next session candidates)
 
-- **Upstream wasm WS-teardown error** — every DPF/HarmonyPIR query (the structured "Run query" **and** the editable runner) triggers a benign unhandled `closure invoked recursively or after being dropped` from `vendor/pir-sdk-wasm/pir_sdk_wasm.js` during WebSocket teardown. It fires *after* correct results return, is **dev-overlay-only** (no overlay in the static export → users never see it), and `client.free()` does **not** suppress it. Per "don't edit vendor", the fix belongs upstream in `Bitcoin-PIR/Bitcoin-PIR`'s `pir-sdk-wasm` WS teardown (a closure held by the WS `onclose`/`onmessage` handler is invoked post-drop), then resync vendor here. Repro: run any DPF query and watch the `next dev` error overlay.
 - **Operator-identity "verified operator" badge** — the v22 vendor sync (2026-05-25) pulled in the operator-signed-identity announce client (`dpf-adapter.ts` config `verifyOperatorIdentity` + `adapter.operatorIdentity.serverN`) and the `PIR_OPERATOR_PUBKEY` pin, but the UI doesn't use them. **Double-blocked, do not wire yet:** (1) the vendored `pir-sdk-wasm` predates the announce verifier (lacks `checkPinnedOperator`/`checkChannelBinding`/`verifyAnnounceResponse`) — needs a `wasm-pack build` + resync; (2) the servers don't dispatch `REQ_ANNOUNCE` yet (`0x07-unsupported`), so the state can never reach `'verified'`. When both clear: gate the badge **only** on `operatorIdentity.serverN.state === 'verified'` (never `chainVerified` alone — a MITM can self-sign a consistent bundle). Full spec in the original `ANNOUNCE_V22_HANDOFF.md` (Task 2) + main repo `docs/OPERATOR_IDENTITY.md`.
 - **Electrum plugin wire-parser audit** — Bitcoin-PIR/Bitcoin-PIR PR #7 changed the client-side wire-parsing contract (1 WS message no longer == 1 record; demux buffer required). The Electrum plugin has its own Python parser; verify it handles batched messages before flipping any other clients.
 - **OnionPIR multi-query batches** — invariant 5 (INDEX Merkle Group-Symmetry) shows as `n/a` on single-query OnionPIR traces because the trace lacks the multi-query structure. The `lib/explorer/invariants.ts` notes this. A future "batch query" UI would let users empirically check it.
@@ -270,11 +277,11 @@ Migrated from `bitcoin-pir.github.io/playground/` → `sdk.bitcoinpir.org`:
 
 ---
 
-## Pin / hash reference (as of 2026-05-26)
+## Pin / hash reference (as of 2026-05-27)
 
 - Reproducible unified_server binary: SHA-256 `57ac525b1d92656a0ae39d6def562d6fc2889a8c6337b8b34f71a59d6ac44d59`
 - Tier 3 UKI: **v23** (2026-05-26) — the SEV-SNP MEASUREMENT below is the attested value. No standalone UKI file SHA-256 was published this release; clients pin the binary SHA + MEASUREMENT, not the UKI file.
 - SEV-SNP MEASUREMENT (Tier 3 UKI v23): `4fb0ad57b28b7c33e6b2977f911fd6bf407ccf28bbab3ef9d24dceec579464a5961e10f5297a294c7dde24839eca4c6e`
 - Operator (Tier-1) identity pubkey: `256fb106c039f8009d3caa431a9634ff3fe5db3b9e4d9ae7282bbde66772c97a` — pinned in `attest-pin.ts::PIR_OPERATOR_PUBKEY_HEX`. **Dormant:** the `REQ_ANNOUNCE` dispatch arm isn't deployed (servers answer `0x07-unsupported`), so no client verifies operator identity yet.
 - AMD Turin ARK fingerprint: `1f084161a44bb6d93778a904877d4819cafa5d05ef4193b2ded9dd9c73dd3f6a` (unchanged)
-- BitcoinPIR commit currently vendored: see `vendor/SOURCE_COMMIT.txt` (now `c322e825`)
+- BitcoinPIR commit currently vendored: see `vendor/SOURCE_COMMIT.txt` (now `c0daf855` — PR #15 wasm WS-teardown fix; was `c322e825`)
