@@ -43,7 +43,8 @@ app/                      Next.js App Router pages
 components/
   Header.tsx, Footer.tsx, BackendSelector.tsx     shared
   playground/             AddressInput, QueryRunner, ResultPanel,
-                          CodeSnippet, AttestationBadge, QuickStartCard
+                          EditableRunner, CodeEditor (Monaco), AttestationBadge,
+                          QuickStartCard
   explorer/               FrameTimeline, InvariantStatus, PaddingViz,
                           MerkleCountChart, FoundVsNotFoundDiff,
                           HarmonyTCheck
@@ -57,9 +58,15 @@ lib/
   wasm-loader.ts          one-shot dynamic-import of pir-sdk-wasm
   endpoints.ts            PIR1_URL = wss://weikeng1, PIR2_URL = wss://weikeng2
   address.ts              parseAddress() → {spk, sh160, scriptType}
-  snippet.ts              per-backend TS snippet generator
+  snippet.ts              per-backend TS snippet generator (seeds the editable
+                          runner — must stay RUNNABLE, not just illustrative)
   playground-clients.ts   runDpfQuery, runHarmonyQuery, runOnionPirQuery,
                           ensureOnionWasmFactory (exported)
+  runner/                 in-browser editable code runner (see Recent history)
+    module-map.ts         require() shim → same live SDK bindings as above
+    run-user-code.ts      Sucrase transpile + new Function execute (in-browser)
+    safety-lint.ts        non-blocking attest/Merkle heuristic warnings
+    ambient-dts.ts        Monaco IntelliSense lib for the SDK modules
   explorer/
     frame-tap.ts          window.WebSocket monkey-patch + opcode classifier
     invariants.ts         5-invariant report; APPLICABLE map per backend
@@ -73,11 +80,14 @@ vendor/
                           BitcoinPIR/web/src/
 public/
   CNAME                   sdk.bitcoinpir.org (binds Pages custom domain)
+  monaco/                 GITIGNORED — Monaco vs assets copied from node_modules
+                          by scripts/copy-monaco.mjs on predev/prebuild
   wasm/
     onionpir_client.mjs   OnionPIR FHE runtime (hand-rolled, SEAL doesn't
     onionpir_client.wasm  compile to wasm32)
 scripts/
   sync-vendor.sh          BITCOINPIR_REPO=... npm run sync-vendor
+  copy-monaco.mjs         self-host Monaco vs → public/monaco (predev/prebuild)
 .github/workflows/
   ci.yml                  typecheck + lint + build on push/PR
   pages.yml               static-export build → upload-pages-artifact → deploy
@@ -154,6 +164,7 @@ npm run lint                    # next lint
 npm run build                   # dev build (with basePath / SSR / etc as configured)
 GITHUB_PAGES=1 npm run build    # production static export → out/
 npm run sync-vendor             # resync vendor/ from $BITCOINPIR_REPO
+npm run copy-monaco             # self-host Monaco assets (auto on predev/prebuild)
 ```
 
 `out/` is `.gitignored`. CI workflow runs typecheck + lint + build. Pages workflow runs `GITHUB_PAGES=1 npm run build` then ships `out/` (including `out/CNAME`).
@@ -161,6 +172,25 @@ npm run sync-vendor             # resync vendor/ from $BITCOINPIR_REPO
 Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
+
+## Recent history (2026-05-27) — wasm WS-teardown fix vendored
+
+Re-vendored `pir-sdk-wasm` to pick up the upstream **WebSocket-teardown fix** the editable runner surfaced (BitcoinPIR `main @ c0daf855`, PR #15; fix commit `ae5144be`):
+- **Bug:** every DPF/HarmonyPIR query threw an unhandled `closure invoked recursively or after being dropped` during WS teardown — dev-overlay-only (no overlay in the static export), results always correct, and it reproduced on the original "Run query" path too (not introduced by the runner). Root cause = **drop-before-detach** in `pir-sdk-client/src/wasm_transport.rs` (`WasmWebSocketTransport`): `close()` dropped the WS `Closure`s without first clearing `set_onclose`/`onmessage`/`onerror`/`onopen`, and there was no `Drop` impl — so the browser's next-tick `close` event invoked a freed closure. That's also why `client.free()` after `disconnect()` didn't suppress it.
+- **Fix (upstream, wasm32-only, no wire/protocol/server change):** an idempotent `detach_ws_handlers(ws)` (all four handlers → `None`) called BEFORE `ws.close()` and before dropping the closures, plus an `impl Drop` covering the `free()`/drop path.
+- **Vendor diff:** only `pir_sdk_wasm_bg.wasm` changed (+81 bytes); `.js` glue, `.d.ts`, and all `bitcoinpir-web` TS byte-identical. `SOURCE_COMMIT.txt` → `c0daf855`. **Server pins unchanged** (client-only fix — no redeploy).
+- **Verified live** in-browser against production: DPF + HarmonyPIR both return correct UTXOs (1,284 sats, Merkle passing) and the teardown throw is **gone** on both (no dev overlay, clean console). Coordinated with the BitcoinPIR repo agent via agent-mailbox.
+
+## Recent history (2026-05-26) — editable in-browser code runner
+
+The playground's right-hand panel went from a **read-only snippet** to an **editable, fully in-browser TypeScript runner** ("Edit & run the SDK code"):
+- **What:** Monaco editor (`components/playground/{EditableRunner,CodeEditor}.tsx`) seeded from `lib/snippet.ts`, with a Run button + captured-console output panel. `lib/runner/` does the work: Sucrase strips types + rewrites imports to `require()`, then `new Function` runs it in an async IIFE with a `require` shim (`module-map.ts`) bound to the **same live SDK bindings `playground-clients.ts` uses** — so the editable path can't silently diverge from the structured one.
+- **In-browser, no server:** transpile + execute are client-side; the only network call is the PIR query's WebSocket (already true before). Nothing is sent anywhere to compile/eval.
+- **Safety = surface, not enforce** (matches "no invariant-violating controls"): the whole snippet is editable, but `safety-lint.ts` shows a **non-blocking** amber banner if `verifyMerkleBatch` / `attest` / `upgradeToSecureChannel` go missing.
+- **Monaco self-hosted** (no CDN): `scripts/copy-monaco.mjs` copies `min/vs` → `public/monaco` on `predev`/`prebuild`; `public/monaco` is gitignored. Loaded lazily (`next/dynamic ssr:false`) so `/playground` First Load JS barely moves. Deps added: `@monaco-editor/react`, `monaco-editor`, `sucrase`.
+- **Snippet fixes surfaced by actually running them:** the DPF snippet was missing `await client.fetchCatalog()` (threw `invalid state: no catalog`); added it + `client.free()` on both wasm snippets to match `runDpfQuery`'s lifecycle.
+- **Verified live** in-browser against production: DPF (`1Q2TWHE3…` → 1,284 sats, ~9 s) and OnionPIR (same address, ~57 s, FHE) both return correct UTXOs with Merkle passing; lint banner appears + stays non-blocking. `typecheck` / `lint` / static-export build all green.
+- **Known wart (pre-existing, NOT from this change) — since FIXED:** the wasm WS-teardown error this surfaced was fixed upstream + re-vendored the next day (see the 2026-05-27 entry above).
 
 ## Recent history (2026-05-26)
 
@@ -231,6 +261,7 @@ Migrated from `bitcoin-pir.github.io/playground/` → `sdk.bitcoinpir.org`:
 - **Don't hardcode `/playground` anywhere.** Custom domain is at root. Use `process.env.NEXT_PUBLIC_BASE_PATH` (always `''`) if you need a base.
 - **Don't push to main without typecheck + build passing.** The CI workflow catches it but you'll get a failed Pages deploy.
 - **Don't add `next dev` cache to .git** (it's `.gitignored`; if Next.js writes a new state file, add it there).
+- **Don't commit `public/monaco`.** It's gitignored and regenerated from `node_modules` by `scripts/copy-monaco.mjs` on `predev`/`prebuild` (~15 MB of Monaco `vs` assets).
 
 ---
 
@@ -246,11 +277,11 @@ Migrated from `bitcoin-pir.github.io/playground/` → `sdk.bitcoinpir.org`:
 
 ---
 
-## Pin / hash reference (as of 2026-05-26)
+## Pin / hash reference (as of 2026-05-27)
 
 - Reproducible unified_server binary: SHA-256 `57ac525b1d92656a0ae39d6def562d6fc2889a8c6337b8b34f71a59d6ac44d59`
 - Tier 3 UKI: **v23** (2026-05-26) — the SEV-SNP MEASUREMENT below is the attested value. No standalone UKI file SHA-256 was published this release; clients pin the binary SHA + MEASUREMENT, not the UKI file.
 - SEV-SNP MEASUREMENT (Tier 3 UKI v23): `4fb0ad57b28b7c33e6b2977f911fd6bf407ccf28bbab3ef9d24dceec579464a5961e10f5297a294c7dde24839eca4c6e`
 - Operator (Tier-1) identity pubkey: `256fb106c039f8009d3caa431a9634ff3fe5db3b9e4d9ae7282bbde66772c97a` — pinned in `attest-pin.ts::PIR_OPERATOR_PUBKEY_HEX`. **Dormant:** the `REQ_ANNOUNCE` dispatch arm isn't deployed (servers answer `0x07-unsupported`), so no client verifies operator identity yet.
 - AMD Turin ARK fingerprint: `1f084161a44bb6d93778a904877d4819cafa5d05ef4193b2ded9dd9c73dd3f6a` (unchanged)
-- BitcoinPIR commit currently vendored: see `vendor/SOURCE_COMMIT.txt` (now `c322e825`)
+- BitcoinPIR commit currently vendored: see `vendor/SOURCE_COMMIT.txt` (now `c0daf855` — PR #15 wasm WS-teardown fix; was `c322e825`)

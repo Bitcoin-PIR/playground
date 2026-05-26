@@ -20,8 +20,9 @@ export default function PlaygroundPage() {
           /{' '}
           <code className="font-mono text-xs">wss://weikeng2.bitcoinpir.org</code>,
           attest the server binaries, run the query, and verify the per-bucket
-          Merkle proofs. The right panel shows the equivalent TypeScript code your
-          wallet would write to do the same.
+          Merkle proofs. The right panel is the equivalent TypeScript your wallet
+          would write — editable and runnable right here, transpiled and executed
+          entirely in your browser.
         </p>
       </div>
 

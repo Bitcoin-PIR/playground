@@ -10,3 +10,7 @@ dist/
 *.tsbuildinfo
 next-env.d.ts
 /out/
+
+# Self-hosted Monaco editor assets (copied from node_modules by
+# scripts/copy-monaco.mjs on predev/prebuild — never committed).
+/public/monaco/
