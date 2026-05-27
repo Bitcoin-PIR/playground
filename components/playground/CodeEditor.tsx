@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import Editor, {
   loader,
   type BeforeMount,
   type OnMount,
 } from '@monaco-editor/react';
 import { SDK_AMBIENT_DTS } from '@/lib/runner/ambient-dts';
+import { useThemeMode } from '@/lib/use-theme-mode';
 
 // Self-host Monaco's AMD assets (copied to /public/monaco/vs by
 // scripts/copy-monaco.mjs) instead of the default jsDelivr CDN, so this static
@@ -15,13 +16,6 @@ import { SDK_AMBIENT_DTS } from '@/lib/runner/ambient-dts';
 // next.config.mjs); the `?? ''` keeps the subpath fallback working.
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 loader.config({ paths: { vs: `${basePath}/monaco/vs` } });
-
-function prefersDark(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    !!window.matchMedia?.('(prefers-color-scheme: dark)').matches
-  );
-}
 
 export function CodeEditor({
   value,
@@ -35,20 +29,13 @@ export function CodeEditor({
   onRun?: () => void;
   height?: number;
 }) {
-  const [dark, setDark] = useState(prefersDark);
+  // Follow the site theme (the `dark` class on <html>) so the editor chrome
+  // tracks the header toggle, not just the OS preference.
+  const dark = useThemeMode();
   // Keep the latest onRun in a ref so the editor command (bound once at mount)
   // always calls the current handler.
   const onRunRef = useRef(onRun);
   onRunRef.current = onRun;
-
-  // Tailwind uses media-strategy dark mode (no `darkMode` key in
-  // tailwind.config.ts), so follow the OS preference for the editor chrome too.
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = (e: MediaQueryListEvent) => setDark(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, []);
 
   const beforeMount: BeforeMount = (monaco) => {
     const ts = monaco.languages.typescript;

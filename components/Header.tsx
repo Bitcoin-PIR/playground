@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 const NAV = [
   { href: '/playground', label: 'Playground' },
@@ -33,6 +34,7 @@ export function Header() {
           >
             GitHub
           </a>
+          <ThemeToggle />
         </nav>
       </div>
     </header>

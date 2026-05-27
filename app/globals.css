@@ -3,8 +3,13 @@
 @tailwind utilities;
 
 @layer base {
+  /* Tie the browser's native control/scrollbar coloring to our explicit theme
+     class (set by the toggle) rather than the OS preference. */
   :root {
-    color-scheme: light dark;
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
   }
 }
 
