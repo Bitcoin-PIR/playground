@@ -11,7 +11,7 @@ export default function RateLimitingPage() {
   return (
     <div className="container-wide py-10">
       <h1 className="text-3xl font-bold tracking-tight">Anonymous rate limiting</h1>
-      <p className="mt-3 max-w-3xl text-zinc-600 dark:text-zinc-400">
+      <p className="mt-3 text-zinc-600 dark:text-zinc-400">
         Two ways to rate-limit PIR queries without deanonymizing the user, end-to-end:{' '}
         <strong>mint → obtain → present → verify</strong>.{' '}
         <strong>ARC</strong> is a multi-show credential (one credential authorizes N
@@ -20,7 +20,7 @@ export default function RateLimitingPage() {
         per query). Watch the quota drain, then try a replay to see the gate reject it.
       </p>
 
-      <div className="mt-4 max-w-3xl rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/40">
+      <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/40">
         <p>
           The blinding/finalizing runs in WASM (the secrets never leave your browser); the
           issuer is the <strong>dev-issuer</strong> — a demo backend with{' '}
