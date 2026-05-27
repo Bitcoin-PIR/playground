@@ -173,6 +173,19 @@ Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
 
+## Recent history (2026-05-27) — light/dark theme toggle
+
+Added a user-facing **light/dark theme toggle** (sun/moon button in the shared `Header`, so it appears on every page). The site already had `dark:` variants everywhere but only followed the OS via Tailwind's default *media* strategy — there was no manual control.
+- **Strategy switch:** `tailwind.config.ts` → `darkMode: 'class'`. Single source of truth is the **`dark` class on `<html>`**.
+- **No flash on the static export:** a blocking inline `<head>` script (`lib/theme.ts::THEME_INIT_SCRIPT`, rendered by `app/layout.tsx`) sets the class before first paint from `localStorage` (fallback = OS preference). `<html>` carries `suppressHydrationWarning` because that script mutates the class pre-hydration.
+- **Toggle:** `components/ThemeToggle.tsx` calls `lib/theme.ts::toggleTheme()` — flips the class + persists to `localStorage`. The sun/moon icon is **pure CSS** (`dark:` variants), so it's hydration-safe with no React state.
+- **Native controls:** `app/globals.css` ties `color-scheme` to the class (`:root` light, `.dark` dark) so number inputs / scrollbars match the chosen theme.
+- **Monaco follows it too:** `components/playground/CodeEditor.tsx` now reads the `dark` class via `lib/use-theme-mode.ts::useThemeMode()` (a `MutationObserver` on `<html>`) instead of its own `matchMedia` listener — the editor chrome tracks the toggle (`vs-dark` ↔ `light`).
+- **Module split (gotcha):** `lib/theme.ts` stays **React-free** so the Server-Component layout can import `THEME_INIT_SCRIPT`; the `useThemeMode` hook lives separately in `lib/use-theme-mode.ts` (client-only). A Server Component importing a module that pulls in `useState`/`useEffect` is a build error.
+- **Deliberate exception:** the captured-console / `Log` panels (playground output, rate-limiting) keep a fixed dark background in both themes — intentional terminal styling, not a miss.
+- Bundled with a small layout fix: the `/rate-limiting` intro paragraph + amber dev-issuer note dropped `max-w-3xl` to span the full `container-wide` width (was stopping at ~60%).
+- **Verified:** `typecheck` + `lint` + static-export build green; toggle round-trips light↔dark + persists across reload with no flash; Monaco flips with it. **No vendor/server change** — pins unchanged. Commits `564ecc6` (rate-limiting width) + `14d0181` (toggle); deployed live.
+
 ## Recent history (2026-05-27) — wasm WS-teardown fix vendored
 
 Re-vendored `pir-sdk-wasm` to pick up the upstream **WebSocket-teardown fix** the editable runner surfaced (BitcoinPIR `main @ c0daf855`, PR #15; fix commit `ae5144be`):
