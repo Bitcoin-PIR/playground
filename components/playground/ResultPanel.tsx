@@ -2,6 +2,7 @@
 
 import type { PlaygroundQueryResult } from '@/lib/playground-clients';
 import { AttestationBadge } from './AttestationBadge';
+import { OperatorIdentityBadge } from './OperatorIdentityBadge';
 
 export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
   const btc = (sats: bigint) =>
@@ -24,6 +25,19 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
           ))}
         </div>
       </div>
+
+      {result.operatorIdentity.some(
+        (o) => o.identity.state === 'verified' || o.identity.state === 'unverified',
+      ) && (
+        <div>
+          <div className="mb-2 text-sm font-medium">Operator identity</div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {result.operatorIdentity.map((o) => (
+              <OperatorIdentityBadge key={o.label} op={o} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {result.isWhale && (
         <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">

@@ -23,8 +23,11 @@ import {
   AMD_TURIN_ARK_FINGERPRINT,
   PIR1_PIN,
   PIR2_TIER3_PIN,
+  PIR_OPERATOR_PUBKEY,
   type ServerAttestPin,
 } from '@vendor/web/attest-pin';
+import { gateOperatorIdentity, type OperatorIdentity } from '@vendor/web/dpf-adapter';
+import type { WasmAnnounceVerification } from '@vendor/web/sdk-bridge';
 import { OnionPirWebClient } from '@vendor/web/onionpir_client';
 import type { QueryResult, UtxoEntry } from '@vendor/web/types';
 import type { Backend } from '@/components/BackendSelector';
@@ -48,6 +51,19 @@ export interface AttestationSummary {
   launchMeasurementHex?: string;
   /** What we compared against (the operator-pinned values). */
   pin: ServerAttestPin;
+}
+
+/**
+ * Per-server operator-signed-identity (REQ_ANNOUNCE) verdict, paired with
+ * the connection-order label. `identity.state === 'verified'` means the
+ * server's announce bundle passed the operator-pin + cert-signature +
+ * validity + chain + channel-binding checks against the pinned operator
+ * key. Gate any "verified operator" UI on that state alone.
+ */
+export interface OperatorIdentitySummary {
+  /** Connection-order label, matching `AttestationSummary.label`. */
+  label: string;
+  identity: OperatorIdentity;
 }
 
 export interface PlaygroundUtxo {
@@ -82,6 +98,9 @@ export interface PlaygroundQueryResult {
   merkleVerified: boolean;
   /** Per-server attestation, in connection order. */
   attestation: AttestationSummary[];
+  /** Per-server operator-signed-identity verdict, in connection order.
+   *  Empty for backends without a secure channel (OnionPIR). */
+  operatorIdentity: OperatorIdentitySummary[];
   /** Backend-specific notes (e.g. "Hint server attestation skipped — Hetzner has no SEV"). */
   notes: string[];
 }
@@ -101,12 +120,17 @@ interface ClientWithAttest {
     free(): void;
   }>;
   upgradeToSecureChannel(pub0: Uint8Array, pub1: Uint8Array): Promise<void>;
+  announce(serverIndex: number): Promise<WasmAnnounceVerification>;
 }
 
 async function attestAndUpgrade(
   client: ClientWithAttest,
   servers: { url: string; label: string; pin: ServerAttestPin; index: 0 | 1 }[],
-): Promise<{ attestation: AttestationSummary[]; channelUpgraded: boolean }> {
+): Promise<{
+  attestation: AttestationSummary[];
+  channelUpgraded: boolean;
+  operatorIdentity: OperatorIdentitySummary[];
+}> {
   const att: AttestationSummary[] = [];
   const handles: ({ pub: Uint8Array } | null)[] = [];
 
@@ -213,7 +237,51 @@ async function attestAndUpgrade(
     }
   }
 
-  return { attestation: att, channelUpgraded };
+  // Operator-signed identity (REQ_ANNOUNCE), verified after the channel
+  // decision (mirrors BatchPirClientAdapter). Binds each bundle against the
+  // attested channel key captured in `handles`; gate the badge on 'verified'.
+  const operatorIdentity: OperatorIdentitySummary[] = [];
+  for (let i = 0; i < servers.length; i++) {
+    operatorIdentity.push({
+      label: servers[i].label,
+      identity: await verifyOperatorIdentityOne(client, servers[i].index, handles[i]),
+    });
+  }
+
+  return { attestation: att, channelUpgraded, operatorIdentity };
+}
+
+/**
+ * Fetch + gate one server's operator-signed identity. Never throws; folds
+ * any failure into an `OperatorIdentity` snapshot. `handle` carries the
+ * attested channel key (null when attest failed) the bundle's `channel_pub`
+ * is bound against. Mirrors dpf-adapter.ts::verifyOperatorIdentityOne.
+ */
+async function verifyOperatorIdentityOne(
+  client: ClientWithAttest,
+  idx: number,
+  handle: { pub: Uint8Array } | null,
+): Promise<OperatorIdentity> {
+  if (!handle) {
+    return { state: 'error', error: 'attestation unavailable; cannot bind channel key' };
+  }
+  let v: WasmAnnounceVerification;
+  try {
+    v = await client.announce(idx);
+  } catch (e) {
+    const msg = (e as Error)?.message ?? String(e);
+    // A server started without --identity-* answers "announce not
+    // configured" — an expected, benign state.
+    if (/not configured/i.test(msg)) return { state: 'unconfigured' };
+    return { state: 'error', error: msg };
+  }
+  try {
+    const nowSecs = BigInt(Math.floor(Date.now() / 1000));
+    // maxAge 0n: only the future-dated guard runs (issued_at = boot time).
+    return gateOperatorIdentity(v, PIR_OPERATOR_PUBKEY, handle.pub, nowSecs, 0n);
+  } finally {
+    v.free();
+  }
 }
 
 // ── WasmQueryResult -> PlaygroundQueryResult ──────────────────────────────
@@ -265,7 +333,7 @@ export async function runDpfQuery(
   try {
     await client.connect();
 
-    const { attestation } = await attestAndUpgrade(client as unknown as ClientWithAttest, [
+    const { attestation, operatorIdentity } = await attestAndUpgrade(client as unknown as ClientWithAttest, [
       { url: PIR1_URL, label: 'hint (pir1)', pin: PIR1_PIN, index: 0 },
       { url: PIR2_URL, label: 'query (pir2)', pin: PIR2_TIER3_PIN, index: 1 },
     ]);
@@ -301,6 +369,7 @@ export async function runDpfQuery(
 
     return {
       backend: 'dpf',
+      operatorIdentity,
       scriptPubKeyHex,
       scriptHashHex: bytesToHex(scriptHash),
       totalElapsedMs: performance.now() - t0,
@@ -333,7 +402,7 @@ export async function runHarmonyQuery(
   try {
     await client.connect();
 
-    const { attestation } = await attestAndUpgrade(client as unknown as ClientWithAttest, [
+    const { attestation, operatorIdentity } = await attestAndUpgrade(client as unknown as ClientWithAttest, [
       { url: HINT_URL, label: 'hint (pir1)', pin: PIR1_PIN, index: 0 },
       { url: QUERY_URL, label: 'query (pir2)', pin: PIR2_TIER3_PIN, index: 1 },
     ]);
@@ -369,6 +438,7 @@ export async function runHarmonyQuery(
 
     return {
       backend: 'harmonypir',
+      operatorIdentity,
       scriptPubKeyHex,
       scriptHashHex: bytesToHex(scriptHash),
       totalElapsedMs: performance.now() - t0,
@@ -469,6 +539,7 @@ export async function runOnionPirQuery(
 
     return {
       backend: 'onionpir',
+      operatorIdentity: [],
       scriptPubKeyHex,
       scriptHashHex: bytesToHex(scriptHash),
       totalElapsedMs: performance.now() - t0,
