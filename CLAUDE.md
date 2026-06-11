@@ -148,7 +148,7 @@ Source of truth: CLAUDE.md in the main `Bitcoin-PIR/Bitcoin-PIR` repo. Mirror he
 | `wss://weikeng1.bitcoinpir.org` | hint + DPF + OnionPIR query | Hetzner i7-8700 (no SEV) | binary SHA-256 pin only |
 | `wss://weikeng2.bitcoinpir.org` | HarmonyPIR query (`--serve-queries` only, no OnionPIR) | VPSBG SEV-SNP, Tier 3 UKI | SEV-SNP MEASUREMENT + binary SHA-256 |
 
-Pins live in `vendor/bitcoinpir-web/attest-pin.ts`. Both servers run the **same** reproducible `nix build .#unified-server` binary (currently `57ac525b…`) — so `PIR1_PIN.binarySha256Hex == PIR2_TIER3_PIN.binarySha256Hex`. pir2's Tier-3 UKI **v23** embeds the same binary; MEASUREMENT is `4fb0ad57…`. The v23 binary also stages operator-signed identity (`--identity-*`), but the `REQ_ANNOUNCE` *dispatch* arm isn't deployed yet — servers answer `0x07-unsupported` — so the announce flow is **dormant** and no client verifies operator identity. Don't surface a "verified operator" badge until upstream ships + re-pins a dispatch-arm binary (see `vendor/bitcoinpir-web/attest-pin.ts::PIR_OPERATOR_PUBKEY_HEX`).
+Pins live in `vendor/bitcoinpir-web/attest-pin.ts`. Both servers run the **same** reproducible `nix build .#unified-server` binary (currently `bb2cf422…`, **v24** from the 2026-06 security review) — so `PIR1_PIN.binarySha256Hex == PIR2_TIER3_PIN.binarySha256Hex`. pir2's Tier-3 UKI **v24** embeds the same binary; MEASUREMENT is `59ab13f5…`. Both servers also dispatch `REQ_ANNOUNCE` (operator-signed identity — live upstream since 2026-05-28, verified end-to-end): the playground's "verified operator" badge (repo PR #5) gates **only** on `operatorIdentity.serverN.state === 'verified'` against `attest-pin.ts::PIR_OPERATOR_PUBKEY_HEX` — never on `chainVerified` alone (a MITM can self-sign a consistent bundle).
 
 If a redeploy bumps either SHA or MEASUREMENT: update `vendor/bitcoinpir-web/attest-pin.ts` in the main repo, push, resync vendor here.
 
@@ -172,6 +172,15 @@ npm run copy-monaco             # self-host Monaco assets (auto on predev/prebui
 Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
+
+## Recent history (2026-06-11) — v24 security-review re-vendor
+
+Re-vendored everything from BitcoinPIR `main @ 024c72ff` (the v24 fleet redeploy from the **2026-06 security review** — `docs/CODE_REVIEW_2026-06.md`, PR #19, merge `5f70ae8b`) and redeployed the site:
+- **Pins:** `PIR1_PIN` + `PIR2_TIER3_PIN` `binarySha256Hex` → `bb2cf422…` (shared-binary invariant preserved); `PIR2_TIER3_PIN.measurementHex` → `59ab13f5…` (Tier-3 UKI **v24**). Lineage: `f7df82d0…` (v22) → `57ac525b…` (v23) → `bb2cf422…` (v24).
+- **Security fixes vendored:** **W1** — unsound `verifyMerkleProof` removed from `merkle.ts` (it never bound the leaf into the recomputed root), along with `computeLeafHash`/`parseTreeTopCache`; real proof walks live in the wasm (`verifyBucketMerkleItem`) + OnionPIR `walkTreeTopToRoot`. No playground code referenced the removed exports. **W3** — adapter `teardown()` now async: nulls the wasm-client handle first (no concurrent double-free) and awaits `disconnect()` before `free()` (wasm-bindgen borrow race); public `disconnect(): void` unchanged, so call sites needed nothing. **C7** — the wasm now rejects malicious catalog geometry (server-supplied `index_k`/`chunk_k` < 3 previously wedged the client in an infinite rejection-sampling loop; zero-bin DBs too) — `validate_db_geometry` error strings confirmed present in the vendored `.wasm`.
+- **Wasm rebuilt from source** (`wasm-pack build --target web`) rather than trusting the stale `pkg/`; `.d.ts` diff was wasm-bindgen closure-hash churn only — no public API change, `lib/runner/module-map.ts` + `ambient-dts.ts` untouched.
+- `SOURCE_COMMIT.txt` → `024c72ff` (annotated: main-repo tree dirty only in non-vendored `.github/workflows/` + `docs/`).
+- **Verified against production pre-deploy** (local build, real servers): all three backends return the known-good 2 UTXOs / 1,284 sats for `1Q2TWHE3…`; pir1 `NO SEV — PIN ONLY` with `binary=bb2cf422…`; pir2 **`AMD CHAIN OK` / "AMD VCEK chain validated"** with the v24 binary + measurement; both servers `🔏 OPERATOR-ENDORSED` under the pinned key (the PR #5 badge — shipped earlier without a history entry — works against v24); console clean (no W3 teardown noise). `typecheck` + `lint` + static-export build green; old pins absent from the built bundle.
 
 ## Recent history (2026-05-27) — light/dark theme toggle
 
@@ -258,7 +267,6 @@ Migrated from `bitcoin-pir.github.io/playground/` → `sdk.bitcoinpir.org`:
 
 ## Open follow-ups (next session candidates)
 
-- **Operator-identity "verified operator" badge** — the v22 vendor sync (2026-05-25) pulled in the operator-signed-identity announce client (`dpf-adapter.ts` config `verifyOperatorIdentity` + `adapter.operatorIdentity.serverN`) and the `PIR_OPERATOR_PUBKEY` pin, but the UI doesn't use them. **Double-blocked, do not wire yet:** (1) the vendored `pir-sdk-wasm` predates the announce verifier (lacks `checkPinnedOperator`/`checkChannelBinding`/`verifyAnnounceResponse`) — needs a `wasm-pack build` + resync; (2) the servers don't dispatch `REQ_ANNOUNCE` yet (`0x07-unsupported`), so the state can never reach `'verified'`. When both clear: gate the badge **only** on `operatorIdentity.serverN.state === 'verified'` (never `chainVerified` alone — a MITM can self-sign a consistent bundle). Full spec in the original `ANNOUNCE_V22_HANDOFF.md` (Task 2) + main repo `docs/OPERATOR_IDENTITY.md`.
 - **Electrum plugin wire-parser audit** — Bitcoin-PIR/Bitcoin-PIR PR #7 changed the client-side wire-parsing contract (1 WS message no longer == 1 record; demux buffer required). The Electrum plugin has its own Python parser; verify it handles batched messages before flipping any other clients.
 - **OnionPIR multi-query batches** — invariant 5 (INDEX Merkle Group-Symmetry) shows as `n/a` on single-query OnionPIR traces because the trace lacks the multi-query structure. The `lib/explorer/invariants.ts` notes this. A future "batch query" UI would let users empirically check it.
 - **ARC + Cashu anonymous rate-limiting** — main repo has the server side (`pir-runtime-core/src/arc`, etc.). Surfacing it in the playground (so users can mint credentials, see them attached to queries) is a real UI project. See main repo memory `project_anonymous_rate_limiting`.
@@ -285,16 +293,16 @@ Migrated from `bitcoin-pir.github.io/playground/` → `sdk.bitcoinpir.org`:
 | `ERR_CERT_COMMON_NAME_INVALID` on `sdk.bitcoinpir.org` | Cert hasn't provisioned yet OR Cloudflare proxy is on but SSL mode is Flexible | Wait 5-30 min; verify `gh api repos/Bitcoin-PIR/playground/pages` shows `https_certificate.state` = `issued`/`approved`; ensure Cloudflare proxy is OFF or SSL = Full (strict) |
 | Pages workflow fails on push | Probably typecheck or lint regression introduced upstream | `npm run typecheck` + `npm run lint` locally, fix, push |
 | `OnionPIR — Failed to fetch /wasm/onionpir_client.mjs` | `NEXT_PUBLIC_BASE_PATH` not in sync with deploy path | Verify `next.config.mjs` env block matches the deploy URL (root = `''`, subpath = `/playground`) |
-| Live HarmonyPIR query emits ~622 hint frames again | The new server binary got rolled back, or pir1/pir2 are running the pre-#7 binary | Re-run `nix build .#unified-server` + redeploy on pir1; rebuild UKI (current: v23) + redeploy on pir2 |
+| Live HarmonyPIR query emits ~622 hint frames again | The new server binary got rolled back, or pir1/pir2 are running the pre-#7 binary | Re-run `nix build .#unified-server` + redeploy on pir1; rebuild UKI (current: v24) + redeploy on pir2 |
 | `UNKNOWN_0x44` / `UNKNOWN_0x46` reappears in the wire timeline | Vendor `constants.ts` got resynced from a pre-#5 commit | Resync from main `>= 7d54428d` |
 
 ---
 
-## Pin / hash reference (as of 2026-05-27)
+## Pin / hash reference (as of 2026-06-11)
 
-- Reproducible unified_server binary: SHA-256 `57ac525b1d92656a0ae39d6def562d6fc2889a8c6337b8b34f71a59d6ac44d59`
-- Tier 3 UKI: **v23** (2026-05-26) — the SEV-SNP MEASUREMENT below is the attested value. No standalone UKI file SHA-256 was published this release; clients pin the binary SHA + MEASUREMENT, not the UKI file.
-- SEV-SNP MEASUREMENT (Tier 3 UKI v23): `4fb0ad57b28b7c33e6b2977f911fd6bf407ccf28bbab3ef9d24dceec579464a5961e10f5297a294c7dde24839eca4c6e`
-- Operator (Tier-1) identity pubkey: `256fb106c039f8009d3caa431a9634ff3fe5db3b9e4d9ae7282bbde66772c97a` — pinned in `attest-pin.ts::PIR_OPERATOR_PUBKEY_HEX`. **Dormant:** the `REQ_ANNOUNCE` dispatch arm isn't deployed (servers answer `0x07-unsupported`), so no client verifies operator identity yet.
+- Reproducible unified_server binary: SHA-256 `bb2cf422f90ab8f8033ba42203cb95af3e0d3fd45ad3480ec8fb0f7a54922439` (v24, 2026-06 security review)
+- Tier 3 UKI: **v24** (2026-06-11) — the SEV-SNP MEASUREMENT below is the attested value; clients pin the binary SHA + MEASUREMENT, not the UKI file (upstream notes UKI file sha256 `4eefec07…`).
+- SEV-SNP MEASUREMENT (Tier 3 UKI v24): `59ab13f573e170febe49dd24cea5e3674da35a4662c060404e1fc8cb500e45520fa1330789f64849bb1ef41ffc44c70c`
+- Operator (Tier-1) identity pubkey: `256fb106c039f8009d3caa431a9634ff3fe5db3b9e4d9ae7282bbde66772c97a` — pinned in `attest-pin.ts::PIR_OPERATOR_PUBKEY_HEX`. **Live:** both servers dispatch `REQ_ANNOUNCE`; the playground's badge (repo PR #5) gates on `operatorIdentity.serverN.state === 'verified'`.
 - AMD Turin ARK fingerprint: `1f084161a44bb6d93778a904877d4819cafa5d05ef4193b2ded9dd9c73dd3f6a` (unchanged)
-- BitcoinPIR commit currently vendored: see `vendor/SOURCE_COMMIT.txt` (now `c0daf855` — PR #15 wasm WS-teardown fix; was `c322e825`)
+- BitcoinPIR commit currently vendored: see `vendor/SOURCE_COMMIT.txt` (now `024c72ff` — 2026-06 security review v24; was `c0daf855`)

@@ -1,1 +1,1 @@
-BitcoinPIR @ c0daf855790532ad49ba841107ee182b3ceec746  (main; PR #15 — wasm WS-teardown fix, commit ae5144be4f032230171a3113786ea5ff2812913b)
+BitcoinPIR @ 024c72ff2c962252bf7dfde71872fcd3a92b28e1  (main; 2026-06 security review v24 — PR #19, merge 5f70ae8b. Source tree was dirty only in non-vendored paths: .github/workflows/, docs/)

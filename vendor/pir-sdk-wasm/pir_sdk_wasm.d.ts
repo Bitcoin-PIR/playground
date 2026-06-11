@@ -2056,12 +2056,12 @@ export interface InitOutput {
     readonly verify_protocol: (a: number, b: number) => number;
     readonly harmonyrequest_position: (a: number) => number;
     readonly wasm_bindgen__closure__destroy__h490263039c0c107c: (a: number, b: number) => void;
-    readonly wasm_bindgen__closure__destroy__h0ce9efb4136d99f9: (a: number, b: number) => void;
+    readonly wasm_bindgen__closure__destroy__h1a9f39d91c56748a: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen__convert__closures_____invoke__h1227e1e7bfd44bf9: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_2: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h42780bd4d4f8b456_3: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h10a7fbf1c0461554: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h10a7fbf1c0461554_2: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h10a7fbf1c0461554_3: (a: number, b: number, c: any) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;
