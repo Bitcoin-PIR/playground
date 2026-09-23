@@ -145,10 +145,12 @@ Source of truth: CLAUDE.md in the main `Bitcoin-PIR/Bitcoin-PIR` repo. Mirror he
 
 | Endpoint | Role | Hardware | Attestation |
 | --- | --- | --- | --- |
-| `wss://weikeng1.bitcoinpir.org` | hint + DPF + OnionPIR query | Hetzner i7-8700 (no SEV) | binary SHA-256 pin only |
-| `wss://weikeng2.bitcoinpir.org` | HarmonyPIR query (`--serve-queries` only, no OnionPIR) | VPSBG SEV-SNP, Tier 3 UKI | SEV-SNP MEASUREMENT + binary SHA-256 |
+| `wss://weikeng1.bitcoinpir.org` | hint + DPF server 0 + OnionPIR — **credits required** | Hetzner i7-8700 (no SEV) | binary SHA-256 pin only |
+| `wss://weikeng2.bitcoinpir.org` | DPF server 1 + HarmonyPIR query + **Direct ORAM** — not charged today | VPSBG SEV-SNP, Tier 3 UKI | SEV-SNP MEASUREMENT + binary SHA-256 |
 
-Pins live in `vendor/bitcoinpir-web/attest-pin.ts`. Both servers run the **same** reproducible `nix build .#unified-server` binary (currently `bb2cf422…`, **v24** from the 2026-06 security review) — so `PIR1_PIN.binarySha256Hex == PIR2_TIER3_PIN.binarySha256Hex`. pir2's Tier-3 UKI **v24** embeds the same binary; MEASUREMENT is `59ab13f5…`. Both servers also dispatch `REQ_ANNOUNCE` (operator-signed identity — live upstream since 2026-05-28, verified end-to-end): the playground's "verified operator" badge (repo PR #5) gates **only** on `operatorIdentity.serverN.state === 'verified'` against `attest-pin.ts::PIR_OPERATOR_PUBKEY_HEX` — never on `chainVerified` alone (a MITM can self-sign a consistent bundle).
+Pins live in `vendor/bitcoinpir-web/attest-pin.ts` (never copy the values into prose). Since the 2026-09 paid-access rollout the two servers run **different** binaries (pir2's adds the ORAM feature), so `PIR1_PIN` and `PIR2_TIER3_PIN` differ. Each server's `REQ_ANNOUNCE` identity is endorsed by **its own** operator key: gate the "verified operator" badge on `operatorIdentity.state === 'verified'` against `PIR1_PROVIDER.operatorPubkey` / `PIR2_PROVIDER.operatorPubkey` (`vendor/bitcoinpir-web/production-providers.ts`) plus the provider's `stableServerId` — never on `chainVerified` alone (a MITM can self-sign a consistent bundle). The legacy single `PIR_OPERATOR_PUBKEY` no longer matches pir2.
+
+Credits (main repo `docs/CREDITS.md`; site doc `content/docs/sdk/payments.mdx`): pir1 refuses metered frames until the connection is funded (`enableCredits` after the sealed channel). The playground has no wallet yet — its credit provider is empty, so DPF/HarmonyPIR/OnionPIR end in a "Payment required" result and ORAM TEE (pir2 only) is the free path and the default backend. Buying in the browser from this origin needs `sdk.bitcoinpir.org` in the cashier's `cors_origins`.
 
 If a redeploy bumps either SHA or MEASUREMENT: update `vendor/bitcoinpir-web/attest-pin.ts` in the main repo, push, resync vendor here.
 
@@ -172,6 +174,16 @@ npm run copy-monaco             # self-host Monaco assets (auto on predev/prebui
 Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
+
+## Recent history (2026-09-23) — credits-era re-vendor, ORAM TEE, payments doc
+
+The site had been broken since pir1 started requiring credits (2026-09-15): the June vendor spoke the pre-credits protocol and decoded pir1's "insufficient gas" error as an empty batch ("batch response has 0 groups").
+- **Vendor** re-synced from BitcoinPIR `main` (see `vendor/SOURCE_COMMIT.txt`); `scripts/sync-vendor.sh` now takes the wasm from `crates/sdk/wasm/pkg` and copies every non-test `web/src/*.ts` (the old hand list still named the deleted Payment V1 files). `@cashu/cashu-ts` added (the vendored credits wallet imports it).
+- **Query layer** (`lib/playground-clients.ts`): per-server operator keys (`PIR1_PROVIDER`/`PIR2_PROVIDER`) + `stableServerId`; `enableCredits` on both legs after the sealed channel with a `creditProvider` hook (empty today); DPF/HarmonyPIR use `queryBatchVerified` (query + Merkle, all or nothing — `queryBatchRaw`/`verifyMerkleBatch` are gone from the wasm); OnionPIR passes pin + identity + credits config; **new ORAM TEE backend** via the vendored `OramPirClientAdapter` in strict mode with `PRODUCTION_ORAM_BATCH_PLANNER` (exported upstream for this). A refused metered frame becomes `paymentRequired` (ResultPanel shows why, the rate-card estimate, and hides the UTXO section).
+- **Snippets / runner**: four runnable snippets with the credit-provider hook; `bitcoin-pir-web` in the runner is the whole vendored `index.ts`; safety lint knows `queryBatchVerified` and ORAM's strict mode + request shape; Monaco ambient types updated.
+- **Explorer**: PIR backends only (ORAM frames are sealed by design); notice that a cleartext run stops at pir1's first metered frame; an aborted run's missing CHUNK round reports `n/a` with the reason instead of a false "privacy violation".
+- **Docs**: new `sdk/payments` (who charges, price, flow, SDK hook, wallet), opcode table (0x05–0x0B, 0x12; retired 0x04/0x08/0x09/0x0D–0x10), TypeScript page (ORAM + ARC classes, payments section), endpoints (credits column, ORAM routing), quickstart callout; the `/rate-limiting` demo (retired dev issuer) now points to the payments doc and the header link says "Payments".
+- **Verified live** against production from a local dev build: ORAM TEE returns the known-good 2 UTXOs / 1,284 sat for `1Q2TWHE3…` and 1,600 sat for `1D4HSHPJ…` (txid matches the main site's DPF result), AMD chain + operator identity + DB proof verified, credits "free"; DPF/HarmonyPIR/OnionPIR attest and verify identity on both servers, then show "Payment required" with pir1's verbatim refusal; the ORAM and DPF snippets run verbatim in the editor; explorer DPF run shows padding PASS and the aborted CHUNK check as n/a.
 
 ## Recent history (2026-06-11) — v24 security-review re-vendor
 

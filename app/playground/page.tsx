@@ -19,10 +19,16 @@ export default function PlaygroundPage() {
           <code className="font-mono text-xs">wss://weikeng1.bitcoinpir.org</code>{' '}
           /{' '}
           <code className="font-mono text-xs">wss://weikeng2.bitcoinpir.org</code>,
-          attest the server binaries, run the query, and verify the per-bucket
-          Merkle proofs. The right panel is the equivalent TypeScript your wallet
-          would write — editable and runnable right here, transpiled and executed
-          entirely in your browser.
+          attest the server binaries, run the query, and verify the result (per-bucket
+          Merkle proofs, or for Direct ORAM the attested runtime&apos;s database proof).
+          The right panel is the equivalent TypeScript your wallet would write — editable
+          and runnable right here, transpiled and executed entirely in your browser.
+        </p>
+        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+          pir1 charges <a href="/docs/sdk/payments" className="underline">credits</a> for
+          DPF, HarmonyPIR and OnionPIR lookups and the playground has no wallet yet, so those
+          stop at the first paid frame and show why. <strong>ORAM TEE</strong> only talks to
+          pir2 and is free today.
         </p>
       </div>
 

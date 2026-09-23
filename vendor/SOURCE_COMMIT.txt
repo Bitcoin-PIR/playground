@@ -1,1 +1,1 @@
-BitcoinPIR @ 024c72ff2c962252bf7dfde71872fcd3a92b28e1  (main; 2026-06 security review v24 — PR #19, merge 5f70ae8b. Source tree was dirty only in non-vendored paths: .github/workflows/, docs/)
+BitcoinPIR @ f7001faf8f43ebbe9db2384a2e058d8185820255

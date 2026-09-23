@@ -2,7 +2,7 @@
 
 The TypeScript SDK is the recommended path for browser wallets and any
 Node-based environment. It's the wasm-pack output of the
-[`pir-sdk-wasm`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/pir-sdk-wasm)
+[`pir-sdk-wasm`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/crates/sdk/wasm)
 crate — the full Rust `pir-sdk-client` running inside the browser via
 WebAssembly.
 
@@ -20,6 +20,8 @@ npm install pir-sdk-wasm
 | --- | --- |
 | `WasmDpfClient` | Two-server DPF client. The default. |
 | `WasmHarmonyClient` | Two-server HarmonyPIR client with offline hint phase. |
+| `WasmOramClient` | One-server Direct ORAM client (AMD SEV-SNP). The free backend today; see [Payments](/docs/sdk/payments). |
+| `WasmArcCredentialRequest`, `WasmArcCredential` | Credits: the blinded ARC credential request and the credential it finalizes into. |
 | `WasmQueryResult` | Per-script-hash result (UTXOs, balance, Merkle status). |
 | `WasmSyncResult` | A whole sync's worth of results, plus synced height. |
 | `WasmDatabaseCatalog` | The server-published catalog of available databases. |
@@ -345,12 +347,15 @@ SDK exposes them so a port doesn't need its own polyfill.
 
 Equal-length XOR. Convenience for DPF's `server0 ⊕ server1` fold.
 
-## ARC (anonymous rate-limited credentials)
+## Payments (credits)
 
-Optional. If the server is configured with rate limiting via ARC, the
-SDK provides `WasmArcPresentationState` for managing client-side
-credential presentations. See the ARC documentation in the main repo
-for the issuance + presentation flow.
+A server that requires credits refuses metered frames until the
+connection is funded. Every client has `enableCredits(...)`: call it after
+`upgradeToSecureChannel` with a credit provider, and the client presents
+credits (`REQ_CREDIT_PRESENT`) whenever a connection's balance runs short.
+`presentCredits(...)` is the one-shot primitive underneath. Who charges,
+the price, and a complete wallet are on the [Payments](/docs/sdk/payments)
+page.
 
 ## What's not in this SDK
 

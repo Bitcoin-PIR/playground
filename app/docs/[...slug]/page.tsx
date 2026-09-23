@@ -50,6 +50,8 @@ async function loadMdx(slug: string) {
       return import('@/content/docs/sdk/typescript.mdx');
     case 'sdk/rust':
       return import('@/content/docs/sdk/rust.mdx');
+    case 'sdk/payments':
+      return import('@/content/docs/sdk/payments.mdx');
     case 'protocol/wire-format':
       return import('@/content/docs/protocol/wire-format.mdx');
     case 'protocol/dpf':

@@ -10,9 +10,13 @@
  * verbatim:
  *
  *   import init, { WasmDpfClient } from 'pir-sdk-wasm';
- *   import { addressToScriptPubKey, scriptHash, hexToBytes } from 'bitcoin-pir-web';
+ *   import { addressToScriptPubKey, OramPirClientAdapter, PIR2_PROVIDER, ... } from 'bitcoin-pir-web';
  *   import { ... } from 'bitcoin-pir-web/attest-pin';
  *   import { OnionPirWebClient } from 'bitcoin-pir-web/onionpir_client';
+ *
+ * `bitcoin-pir-web` is the whole vendored SDK entry (`web/src/index.ts`
+ * upstream): adapters, pinned providers, the ORAM request shape, and the
+ * credits wallet (IssuerClient, CreditStore, CreditWallet, ...).
  *
  * Every value is the SAME live binding the structured "Run query" path uses
  * (`lib/playground-clients.ts`). There is no second, weaker code path: the
@@ -24,7 +28,7 @@
 
 import { loadWasm } from '@/lib/wasm-loader';
 import { ensureOnionWasmFactory } from '@/lib/playground-clients';
-import * as hash from '@vendor/web/hash';
+import * as bitcoinPirWeb from '@vendor/web/index';
 import * as attestPin from '@vendor/web/attest-pin';
 import { OnionPirWebClient } from '@vendor/web/onionpir_client';
 
@@ -61,10 +65,7 @@ export async function buildModuleMap(source: string): Promise<ModuleMap> {
     'pir-sdk-wasm': pirSdkWasm,
     'bitcoin-pir-web': {
       __esModule: true,
-      addressToScriptPubKey: hash.addressToScriptPubKey,
-      scriptHash: hash.scriptHash,
-      hexToBytes: hash.hexToBytes,
-      bytesToHex: hash.bytesToHex,
+      ...(bitcoinPirWeb as unknown as RunnerModule),
     },
     'bitcoin-pir-web/attest-pin': {
       __esModule: true,

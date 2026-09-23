@@ -1,7 +1,7 @@
 /**
  * Hash functions for the Batch PIR system.
  *
- * Ports the splitmix64-based functions from build/src/common.rs.
+ * Ports the splitmix64-based functions from tools/db-builder/src/common.rs.
  * All 64-bit arithmetic uses BigInt to match the Rust implementation exactly.
  */
 
@@ -224,6 +224,12 @@ import * as hashJs from 'hash.js';
 export function sha256(data: Uint8Array): Uint8Array {
   const lib = (hashJs as any).default || hashJs;
   return new Uint8Array(lib.sha256().update(data).digest());
+}
+
+/** Compute SHA512 hash */
+export function sha512(data: Uint8Array): Uint8Array {
+  const lib = (hashJs as any).default || hashJs;
+  return new Uint8Array(lib.sha512().update(data).digest());
 }
 
 /** Compute RIPEMD160 hash */

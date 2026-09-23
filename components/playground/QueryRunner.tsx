@@ -10,7 +10,8 @@ import { parseAddress } from '@/lib/address';
 import { runQuery, type PlaygroundQueryResult } from '@/lib/playground-clients';
 
 export function QueryRunner() {
-  const [backend, setBackend] = useState<Backend>('dpf');
+  // ORAM TEE is the free backend today (pir1 charges credits; see /docs/sdk/payments).
+  const [backend, setBackend] = useState<Backend>('oram');
   const [address, setAddress] = useState('');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);

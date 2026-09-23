@@ -1,7 +1,7 @@
 /**
  * Constants for the Batch PIR system.
  *
- * Must match build/src/common.rs exactly.
+ * Must match tools/db-builder/src/common.rs exactly.
  */
 
 // ─── Index-level constants ─────────────────────────────────────────────────
@@ -75,14 +75,13 @@ export const CHUNK_DPF_N = 21;
 export const REQ_PING = 0x00;
 export const REQ_GET_INFO = 0x01;
 export const REQ_GET_INFO_JSON = 0x03;
-export const REQ_RESIDENCY = 0x04;
+// 0x04 is retired (former mmap residency diagnostic); do not reuse.
 export const REQ_INDEX_BATCH = 0x11;
 export const REQ_CHUNK_BATCH = 0x21;
 
 export const RESP_PONG = 0x00;
 export const RESP_INFO = 0x01;
 export const RESP_INFO_JSON = 0x03;
-export const RESP_RESIDENCY = 0x04;
 export const RESP_INDEX_BATCH = 0x11;
 export const RESP_CHUNK_BATCH = 0x21;
 export const REQ_GET_DB_CATALOG = 0x02;
@@ -114,7 +113,7 @@ export const RESP_HARMONY_QUERY = 0x42;
 export const RESP_HARMONY_BATCH_QUERY = 0x43;
 
 // V2 hint protocol (server-generated PRP key). Source of truth:
-// pir-runtime-core/src/protocol.rs:28,43,181.
+// crates/protocol/runtime/src/protocol.rs:28,43,181.
 export const REQ_HARMONY_HINTS_V2 = 0x44;
 export const REQ_HARMONY_HINTS_V2_HALF = 0x46;
 export const RESP_HARMONY_HINTS_KEY = 0x44; // same opcode byte, response-direction label
@@ -147,15 +146,29 @@ export const RESP_BUCKET_MERKLE_SIB_BATCH = 0x33;
 export const REQ_BUCKET_MERKLE_TREE_TOPS = 0x34;
 export const RESP_BUCKET_MERKLE_TREE_TOPS = 0x34;
 
-// ─── ARC (Anonymous Rate-limited Credentials) ─────────────────────────────
+// ─── Session grant presentation ───────────────────────────────────────────
+// 0x08 (ARC) and 0x09 (Cashu blind auth) are retired; never reassign.
 
-export const REQ_CREDENTIAL_PRESENT = 0x08;
-export const RESP_CREDENTIAL_OK = 0x08;
+export const REQ_SESSION_GRANT_PRESENT = 0x0b;
+export const RESP_SESSION_GRANT_OK = 0x0b;
+/** Encoded length of a version-1 `pir_session_grant::SessionGrant`. */
+export const SESSION_GRANT_LEN = 133;
 
-// ─── Cashu Blind Auth (NUT-22) ───────────────────────────────────────────
+// ─── Credits (docs/CREDITS.md) ────────────────────────────────────────────
+// `[kind u8][len u32 LE][payload]` presented inside the encrypted channel;
+// the server answers `[gas_added u64 LE][gas_balance i64 LE]`.
 
-export const REQ_CASHU_BAT_PRESENT = 0x09;
-export const RESP_CASHU_BAT_OK = 0x09;
+export const REQ_CREDIT_PRESENT = 0x12;
+export const RESP_CREDIT_OK = 0x12;
+/** Largest `REQ_CREDIT_PRESENT` payload a server decodes (256 KiB). */
+export const MAX_CREDIT_PRESENT_PAYLOAD_LEN = 256 * 1024;
+/**
+ * Client-side pin of the cashier that sells session grants
+ * (`docs/SESSION_GRANTS.md`, `docs/CASHIER_API.md`). The server announces
+ * no payment endpoint, so this is the only place the browser learns where
+ * to pay. Operator-owned; change it here, not at runtime.
+ */
+export const PRODUCTION_CASHIER_URL = 'https://cashier.bitcoinpir.org';
 
 /** Branching factor for per-bucket bin Merkle */
 export const BUCKET_MERKLE_ARITY = 8;

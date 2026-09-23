@@ -17,9 +17,19 @@ interface PirSdkWasm {
     new(): WasmDatabaseCatalog;
     fromJson(json: any): WasmDatabaseCatalog;
   };
+  /** ARC credentials for credits (`docs/CREDITS.md`); see `sdkArcFactories`. */
+  WasmArcCredentialRequest: {
+    new(epoch: number): WasmArcCredentialRequest;
+    fromBytes(epoch: number, secrets: Uint8Array, request: Uint8Array): WasmArcCredentialRequest;
+  };
+  WasmArcCredential: {
+    new(credential: Uint8Array, epoch: number, presentationLimit: number, nextNonce: number): WasmArcCredential;
+  };
   WasmSyncPlan: WasmSyncPlan;
   WasmQueryResult: {
     new(): WasmQueryResult;
+    /** Data import only: caller `merkleVerified` is ignored and the returned
+     * handle is always unverified. */
     fromJson(json: any): WasmQueryResult;
   };
   // Native-WASM DPF client — used by `dpf-adapter.ts` to retire the pure-TS
@@ -42,6 +52,18 @@ interface PirSdkWasm {
   // underneath — the wrapper cannot bypass them.
   WasmHarmonyClient: {
     new(hintServerUrl: string, queryServerUrl: string): WasmHarmonyClient;
+  };
+  // Native-WASM ORAM client — single-server TEE backend. Constructed
+  // with one attested query server URL. Unlike DPF/Harmony, this backend
+  // does not expose PBC inspector results; it returns decoded direct-entry
+  // ORAM query results from `queryBatch`.
+  WasmOramClient: {
+    new(serverUrl: string): WasmOramClient;
+  };
+  /** Same-socket attestation and encrypted framing for the standalone
+   * C++/SEAL OnionPIR browser client. */
+  WasmStandaloneSecureChannelV1: {
+    new(): WasmStandaloneSecureChannelV1;
   };
   // Phase 2+ observability bridge — lock-free atomic counters shared between
   // JavaScript and any client that has the recorder installed. See the
@@ -71,6 +93,19 @@ interface PirSdkWasm {
    */
   turinArkFingerprint(): Uint8Array;
   /**
+   * Verify a standalone SEV-SNP report plus PEM ARK/ASK/VCEK chain using
+   * the same Rust verifier as live runtime attestation. Used for static
+   * database-authenticity proof artifacts.
+   */
+  verifyRawSnpReport(
+    reportBytes: Uint8Array,
+    arkPem: string,
+    askPem: string,
+    vcekPem: string,
+    expectedArkFingerprint: Uint8Array | null,
+    policy: WasmPolicyRequirements,
+  ): void;
+  /**
    * Parse + verify a raw RESP_ANNOUNCE wire payload (the response frame
    * starting at the variant byte) into a `WasmAnnounceVerification`,
    * running the in-bundle chain check. Throws on a wire-format violation
@@ -83,35 +118,25 @@ interface PirSdkWasm {
    * `pir_sdk_client::announce::parse_announce_response`.
    */
   verifyAnnounceResponse(respPayload: Uint8Array): WasmAnnounceVerification;
-  // ARC (Anonymous Rate-limited Credentials) presentation state. Opaque
-  // wrapper over the Rust `arc::PresentationState`; mirrored in TS by
-  // `web/src/credential-manager.ts::ArcCredentialManager`. The constructor
-  // takes the 131-byte credential blob from the payment service plus a
-  // per-session presentation_context and a query limit; `present()` returns
-  // wire-format bytes for `REQ_CREDENTIAL_PRESENT` (server opcode 0x08) and
-  // bumps the internal nonce. `serialize()` / `deserialize()` enable
-  // localStorage persistence across page reloads.
-  WasmArcPresentationState: {
-    new(
-      credentialBytes: Uint8Array,
-      presentationContext: Uint8Array,
-      limit: bigint,
-    ): WasmArcPresentationState;
-    deserialize(bytes: Uint8Array): WasmArcPresentationState;
-  };
-  // ARC "obtain" leg — `WasmArcCredentialRequest`. `request_bytes()` is the
-  // 226-byte CredentialRequest POSTed to the issuer; `finalize()` combines
-  // the issuer's 99-byte pubkey + 454-byte response into the 131-byte
-  // credential consumed by `WasmArcPresentationState`.
-  WasmArcCredentialRequest: {
-    new(requestContext: Uint8Array): WasmArcCredentialRequest;
-  };
-  // Cashu Blind Auth (NUT-22) "obtain" leg — `WasmCashuBlind`. One per BAT:
-  // `blinded_message()` is POSTed to the mint, `unblind()` combines the
-  // returned 33-byte blind signature into the unblinded BAT signature.
-  WasmCashuBlind: {
-    new(): WasmCashuBlind;
-  };
+  /** Stateless verification of one complete `[u32 len][RESP_DB_PROOF...]`
+   * frame. This does not install roots or retain session state. */
+  verifyDatabaseProofResponse(
+    responseFrame: Uint8Array,
+    catalog: WasmDatabaseCatalog,
+    expectedDbId: number,
+    expectedParamsHashHex?: string | null,
+    allowedBuilderBinarySha256Hex?: string | null,
+    allowedBuilderGitCommit?: string | null,
+  ): WasmDatabaseProof;
+  /** V2-only proof verifier used by strict standalone OnionPIR. */
+  verifyDatabaseProofV2Response(
+    responseFrame: Uint8Array,
+    catalog: WasmDatabaseCatalog,
+    expectedDbId: number,
+    expectedParamsHashHex?: string | null,
+    allowedBuilderBinarySha256Hex?: string | null,
+    allowedBuilderGitCommit?: string | null,
+  ): WasmDatabaseProof;
   PRP_HMR12: () => number;
   PRP_FASTPRP: () => number;
   /**
@@ -294,6 +319,19 @@ export interface WasmAttestVerification {
   ): void;
 }
 
+/** Opaque one-shot attestation-bound X25519/AEAD state. Secrets and sequence
+ * counters remain in Rust/WASM; JS only transports canonical frames. */
+export interface WasmStandaloneSecureChannelV1 {
+  free(): void;
+  readonly established: boolean;
+  attestRequest(): Uint8Array;
+  verifyAttestation(responseFrame: Uint8Array): WasmAttestVerification;
+  handshakeRequest(): Uint8Array;
+  completeHandshake(responseFrame: Uint8Array, serverStaticPub: Uint8Array): void;
+  sealFrame(frame: Uint8Array): Uint8Array;
+  openFrame(frame: Uint8Array): Uint8Array;
+}
+
 /**
  * Policy requirements for [`WasmAttestVerification.verifyFull`].
  *
@@ -360,9 +398,42 @@ export interface WasmAnnounceVerification {
   free(): void;
 }
 
-interface WasmDpfClient {
+export interface WasmDatabaseProof {
+  free(): void;
+  readonly dbId: number;
+  /** SHA-256 of the verified server database MANIFEST.toml bytes. */
+  readonly manifestRootHex?: string;
+  readonly buildKind: 'snapshot' | 'delta' | string;
+  readonly fromHeight: number;
+  readonly fromBlockHashHex: string;
+  readonly height: number;
+  readonly blockHashHex: string;
+  readonly muhashHex: string;
+  readonly bucketSuperRootHex: string;
+  readonly onionSuperRootHex: string;
+  readonly paramsHashHex: string;
+  readonly networkMagicHex: string;
+  readonly builderBinarySha256Hex: string;
+  readonly builderGitCommit: string;
+  readonly onionEntrySize: number;
+  readonly proofVersion?: number;
+  readonly onionTotalPackedEntries?: number;
+  readonly onionIndexBinsPerTable?: number;
+  readonly onionChunkBinsPerTable?: number;
+  readonly onionIndexSlotsPerBin?: number;
+  readonly onionIndexSlotSize?: number;
+  toJson(): any;
+}
+
+export interface WasmDpfClient {
   free(): void;
   readonly isConnected: boolean;
+  /** Configure one provider before that leg is connected. */
+  setServerUrl(serverIndex: number, url: string): void;
+  /** Connect or disconnect exactly one independently selected provider. */
+  connectServer(serverIndex: number): Promise<void>;
+  disconnectServer(serverIndex: number): Promise<void>;
+  isServerConnected(serverIndex: number): boolean;
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   /** Send REQ_ATTEST to one of the connected servers (`serverIndex`
@@ -377,6 +448,24 @@ interface WasmDpfClient {
    *  without `--identity-*` flags. See `WasmAnnounceVerification` for the
    *  verification methods to run on the result. */
   announce(serverIndex: number): Promise<WasmAnnounceVerification>;
+  /** Attach a cashier-signed session grant (133 bytes) to one connected
+   *  server and return the credits remaining on that server. Call after
+   *  `upgradeToSecureChannel` — the grant is a bearer token. Rejects with
+   *  the server's error text when grants are not enabled there, the
+   *  issuer is not pinned, or the grant is expired or exhausted. */
+  presentSessionGrant(serverIndex: number, grant: Uint8Array): Promise<number>;
+  /** Present credits (`docs/CREDITS.md`) on one leg: `kind` 1 is a Cashu
+   *  token, 2 an ARC payload from `WasmArcCredential.present`. Resolves to
+   *  `{ gasAdded, gasBalance }`. Bearer material: call after
+   *  `upgradeToSecureChannel`. */
+  presentCredits(serverIndex: number, kind: number, payload: Uint8Array): Promise<{ gasAdded: number; gasBalance: number }>;
+  /** Pay one leg's metered frames from `provider` when that server requires
+   *  credits (`docs/CREDITS.md`): `provider(credits)` returns
+   *  `{ kind, payload, credits }` or `null` and is called from inside query
+   *  calls whenever the connection's balance runs short. Resolves to
+   *  `"not-enabled"`, `"not-required"`, or `"required"`. Call after
+   *  `upgradeToSecureChannel`. */
+  enableCredits(serverIndex: number, provider: (credits: number) => unknown): Promise<string>;
   /** Wrap both server connections with the encrypted-channel transport.
    *  Caller MUST first verify `pub0`/`pub1` came from a trustworthy
    *  source (call `attest` first; ideally also check the SEV-SNP report's
@@ -388,18 +477,45 @@ interface WasmDpfClient {
    *  otherwise). On handshake failure both connections are dropped —
    *  call `connect` again to retry. */
   upgradeToSecureChannel(pub0: Uint8Array, pub1: Uint8Array): Promise<void>;
-  /** Populate the native-side catalog so subsequent `queryBatchRaw` calls
-   * (which go through `query_batch_with_inspector`) can resolve `db_id`
+  /** Upgrade one staged provider without touching the peer leg. */
+  upgradeServerToSecureChannel(serverIndex: number, serverStaticPub: Uint8Array): Promise<void>;
+  /** Populate the native-side catalog so subsequent `queryBatchVerified` calls
+   * can resolve `db_id`
    * against an in-memory catalog. Returns the freshly fetched catalog. */
-  fetchCatalog(): Promise<unknown>;
-  /** Inspector-path batch query. Returns an `Array<WasmQueryResult>` of
-   * length `N` (one per packed scripthash). Every slot is non-null —
-   * not-found queries are synthesised as empty inspector-populated
-   * results so absence-proof bins are preserved. */
-  queryBatchRaw(scriptHashes: Uint8Array, dbId: number): Promise<WasmQueryResult[]>;
-  /** Standalone Merkle verifier — consumes inspector-populated results as
-   * JSON (typically `wqr.toJson()`-serialised). Returns `boolean[]`. */
-  verifyMerkleBatch(resultsJson: any[], dbId: number): Promise<boolean[]>;
+  fetchCatalog(): Promise<WasmDatabaseCatalog>;
+  /** Fetch the catalog from one staged provider. The second catalog must be
+   *  query-compatible with the first before the native client accepts it;
+   *  display names, ordering, and peer-only entries do not affect matching. */
+  fetchCatalogFromServer(serverIndex: number): Promise<WasmDatabaseCatalog>;
+  /** Fetch and verify an attested-builder database proof against the
+   * native catalog. Optional string policy pins may be `undefined` or empty.
+   * Mainnet network magic is always enforced by the WASM method. */
+  verifyDatabaseProof(
+    dbId: number,
+    expectedParamsHashHex?: string | null,
+    allowedBuilderBinarySha256Hex?: string | null,
+    allowedBuilderGitCommit?: string | null,
+  ): Promise<WasmDatabaseProof>;
+  verifyDatabaseProofFromServer(
+    serverIndex: number,
+    dbId: number,
+    expectedParamsHashHex?: string | null,
+    allowedBuilderBinarySha256Hex?: string | null,
+    allowedBuilderGitCommit?: string | null,
+  ): Promise<WasmDatabaseProof>;
+  /** Switch the native client between advisory roots and the fail-closed
+   * policy that requires a proof-installed root for every queried DB. */
+  setRequireVerifiedDatabaseRoots(requireVerified: boolean): void;
+  /** Consume the exact live proof handle returned by `verifyDatabaseProof`.
+   * The caller must complete the TypeScript production-pin comparison first
+   * and must not call `free()` after ownership transfers here. */
+  installVerifiedDatabaseProof(proof: WasmDatabaseProof): void;
+  /** Fetch and bind this DB's Merkle tree-tops to the installed proof root. */
+  preflightDatabase(dbId: number): Promise<void>;
+  /** Release-safe inspector query. Native code binds each result to the
+   * exact input order and db, verifies every INDEX/CHUNK bin, and rejects
+   * the whole batch before exposing handles if any proof fails. */
+  queryBatchVerified(scriptHashes: Uint8Array, dbId: number): Promise<WasmQueryResult[]>;
   /** Register a JS callback for every `ConnectionState` transition; the
    * callback receives a single string (`"connecting"` / `"connected"` /
    * `"disconnected"`). Replaces any previously registered listener. */
@@ -432,13 +548,20 @@ interface WasmSyncPlan {
 /**
  * Native-WASM HarmonyPIR client. See `PirSdkWasm.WasmHarmonyClient` for the
  * constructor signature. Fields used by `harmonypir-adapter.ts`; the full
- * surface exposed by `pir-sdk-wasm/src/client.rs::WasmHarmonyClient` is a
+ * surface exposed by `crates/sdk/wasm/src/client.rs::WasmHarmonyClient` is a
  * superset (notably `queryBatch` + `fetchCatalog`, which the adapter doesn't
- * need because PIR rounds go through `queryBatchRaw`).
+ * need because PIR rounds go through `queryBatchVerified`).
  */
-interface WasmHarmonyClient {
+export interface WasmHarmonyClient {
   free(): void;
   readonly isConnected: boolean;
+  /** Provider 0 is the independently priced hint workload; provider 1 is
+   *  the per-query workload. Either role may be configured/connected first
+   *  without disclosing the peer selection. */
+  setProviderUrl(providerIndex: number, url: string): void;
+  connectProvider(providerIndex: number): Promise<void>;
+  disconnectProvider(providerIndex: number): Promise<void>;
+  isProviderConnected(providerIndex: number): boolean;
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   /** Same as `WasmDpfClient.attest`. `serverIndex` 0 = hint server,
@@ -448,14 +571,54 @@ interface WasmHarmonyClient {
    *  1 = query server. Rejects with "announce not configured" when the
    *  server was started without `--identity-*` flags. */
   announce(serverIndex: number): Promise<WasmAnnounceVerification>;
+  /** Attach a cashier-signed session grant (133 bytes) to one connected
+   *  server and return the credits remaining on that server. Call after
+   *  `upgradeToSecureChannel` — the grant is a bearer token. Rejects with
+   *  the server's error text when grants are not enabled there, the
+   *  issuer is not pinned, or the grant is expired or exhausted. */
+  presentSessionGrant(serverIndex: number, grant: Uint8Array): Promise<number>;
+  /** Present credits (`docs/CREDITS.md`) on one leg: `kind` 1 is a Cashu
+   *  token, 2 an ARC payload from `WasmArcCredential.present`. Resolves to
+   *  `{ gasAdded, gasBalance }`. Bearer material: call after
+   *  `upgradeToSecureChannel`. */
+  presentCredits(serverIndex: number, kind: number, payload: Uint8Array): Promise<{ gasAdded: number; gasBalance: number }>;
+  /** Pay one leg's metered frames from `provider` when that server requires
+   *  credits (`docs/CREDITS.md`): `provider(credits)` returns
+   *  `{ kind, payload, credits }` or `null` and is called from inside query
+   *  calls whenever the connection's balance runs short. Resolves to
+   *  `"not-enabled"`, `"not-required"`, or `"required"`. Call after
+   *  `upgradeToSecureChannel`. */
+  enableCredits(serverIndex: number, provider: (credits: number) => unknown): Promise<string>;
   /** Same as `WasmDpfClient.upgradeToSecureChannel`. Argument order
    *  matches `serverUrls()` — `(hintServerStaticPub, queryServerStaticPub)`. */
   upgradeToSecureChannel(hintServerStaticPub: Uint8Array, queryServerStaticPub: Uint8Array): Promise<void>;
+  upgradeProviderToSecureChannel(providerIndex: number, serverStaticPub: Uint8Array): Promise<void>;
   /** Fetch + cache the database catalog over the WASM client's
    *  internal connection. Returns a `WasmDatabaseCatalog` handle the
    *  caller can pass back into `fetchHintsWithProgress` / `loadHints`
    *  / `fingerprint`. */
   fetchCatalog(): Promise<WasmDatabaseCatalog>;
+  fetchCatalogFromProvider(providerIndex: number): Promise<WasmDatabaseCatalog>;
+  /** Same as `WasmDpfClient.verifyDatabaseProof`. */
+  verifyDatabaseProof(
+    dbId: number,
+    expectedParamsHashHex?: string | null,
+    allowedBuilderBinarySha256Hex?: string | null,
+    allowedBuilderGitCommit?: string | null,
+  ): Promise<WasmDatabaseProof>;
+  verifyDatabaseProofFromProvider(
+    providerIndex: number,
+    dbId: number,
+    expectedParamsHashHex?: string | null,
+    allowedBuilderBinarySha256Hex?: string | null,
+    allowedBuilderGitCommit?: string | null,
+  ): Promise<WasmDatabaseProof>;
+  /** Same strict root-policy switch as `WasmDpfClient`. */
+  setRequireVerifiedDatabaseRoots(requireVerified: boolean): void;
+  /** Consume a pin-matched `WasmDatabaseProof` and install its roots. */
+  installVerifiedDatabaseProof(proof: WasmDatabaseProof): void;
+  /** Fetch and bind this DB's Merkle tree-tops before any address query. */
+  preflightDatabase(dbId: number): Promise<void>;
   serverUrls(): [string, string];
   /** Returns the active `db_id`, or `undefined` if no hints are loaded. */
   dbId(): number | undefined;
@@ -463,14 +626,16 @@ interface WasmHarmonyClient {
   /** Overwrite the random 16-byte master PRP key. Must happen before
    *  `loadHints(...)`. Throws on non-16-byte input. */
   setMasterKey(key: Uint8Array): void;
+  /** Effective key bound to the current hint state. V2 hint setup may
+   *  replace the key originally installed through `setMasterKey`. */
+  cacheMasterKey(): Uint8Array;
+  /** Effective PRP backend selected by V2 hint setup. */
+  cachePrpBackend(): number;
   setPrpBackend(backend: number): void;
-  /** Inspector-path batch query — populates `indexBins`/`chunkBins`
-   *  on every returned `WasmQueryResult`. Not-found slots are
-   *  synthesised as empty inspector-populated results (never null)
-   *  so Merkle absence proofs have something to verify against. */
-  queryBatchRaw(scriptHashes: Uint8Array, dbId: number): Promise<WasmQueryResult[]>;
-  /** Standalone Merkle verifier (mirrors `WasmDpfClient.verifyMerkleBatch`). */
-  verifyMerkleBatch(resultsJson: any[], dbId: number): Promise<boolean[]>;
+  /** Release-safe inspector query. Native code binds each result to the
+   *  exact input order and db, then completes all Merkle checks before
+   *  returning any handle. */
+  queryBatchVerified(scriptHashes: Uint8Array, dbId: number): Promise<WasmQueryResult[]>;
   /** 16-byte fingerprint derived from `(masterKey, prpBackend, catalog.get(dbId))`.
    *  Embedded in `saveHints()` output; exposed here so the IndexedDB
    *  bridge can tag cache entries for debugging. */
@@ -482,6 +647,12 @@ interface WasmHarmonyClient {
    *  cross-checked against `(masterKey, prpBackend, catalog.get(dbId))`;
    *  a mismatch throws rather than silently loading stale hints. */
   loadHints(bytes: Uint8Array, catalog: WasmDatabaseCatalog, dbId: number): void;
+  /** Restore only a complete paid hint resource. Requires authenticated
+   *  tree-tops and rejects/clears main-only or malformed sibling state. */
+  loadCompleteHints(bytes: Uint8Array, catalog: WasmDatabaseCatalog, dbId: number): void;
+  /** Whether the in-memory state exactly covers all main and authenticated
+   *  sibling groups for this proof-verified database. */
+  hasCompleteHints(catalog: WasmDatabaseCatalog, dbId: number): boolean;
   /** Minimum per-group query budget across every loaded HarmonyGroup.
    *  `undefined` when nothing is loaded. */
   minQueriesRemaining(): number | undefined;
@@ -490,7 +661,7 @@ interface WasmHarmonyClient {
   /** Register a `ConnectionState` transition listener. */
   onStateChange(cb: (state: string) => void): void;
   /** Progress-reporting variant of `sync`; currently unused by the
-   *  adapter (queryBatchRaw is the primary path). */
+   *  adapter (`queryBatchVerified` is the primary path). */
   syncWithProgress(
     scriptHashes: Uint8Array,
     lastHeight: number | null | undefined,
@@ -506,11 +677,58 @@ interface WasmHarmonyClient {
     dbId: number,
     progress: (event: { done: number; total: number; phase: string }) => void,
   ): Promise<void>;
+  /** Fetch the restart-safe paid resource: all main and Merkle-sibling hints.
+   *  Strict tree-top preflight must already have completed. */
+  fetchCompleteHintsWithProgress(
+    catalog: WasmDatabaseCatalog,
+    dbId: number,
+    progress: (event: { done: number; total: number; phase: string }) => void,
+  ): Promise<void>;
   /** Install a `WasmAtomicMetrics` recorder. Mirrors
    *  `WasmDpfClient.setMetricsRecorder`; the same recorder can be
    *  installed on multiple clients to aggregate counters across them. */
   setMetricsRecorder(metrics: WasmAtomicMetrics): void;
   /** Remove any installed metrics recorder on this client. */
+  clearMetricsRecorder(): void;
+}
+
+/**
+ * Native-WASM ORAM client. See `crates/sdk/wasm/src/client.rs::WasmOramClient`.
+ *
+ * This is the direct TEE backend surface: one server connection, one
+ * attestation/channel upgrade, then fixed-budget server-side ORAM lookup.
+ * `queryBatch` returns plain `QueryResult` JSON objects or `null`, matching
+ * the decoded shape used by the DPF/Harmony high-level wrappers.
+ * `queryBatchPadded` sends the same real script hashes padded with explicit
+ * empty slots inside the TEE ORAM request, and returns only real results.
+ */
+export interface WasmOramClient {
+  free(): void;
+  readonly isConnected: boolean;
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  attest(): Promise<WasmAttestVerification>;
+  announce(): Promise<WasmAnnounceVerification>;
+  /** Attach a cashier-signed session grant; see `WasmDpfClient.presentSessionGrant`. */
+  presentSessionGrant(grant: Uint8Array): Promise<number>;
+  /** Present credits on the connection; see `WasmDpfClient.presentCredits`. */
+  presentCredits(kind: number, payload: Uint8Array): Promise<{ gasAdded: number; gasBalance: number }>;
+  /** Pay the server's metered frames from `provider` when it requires credits; see `WasmDpfClient.enableCredits`. */
+  enableCredits(provider: (credits: number) => unknown): Promise<string>;
+  upgradeToSecureChannel(serverStaticPub: Uint8Array): Promise<void>;
+  fetchCatalog(): Promise<WasmDatabaseCatalog>;
+  verifyDatabaseProof(
+    dbId: number,
+    expectedParamsHashHex?: string | null,
+    allowedBuilderBinarySha256Hex?: string | null,
+    allowedBuilderGitCommit?: string | null,
+  ): Promise<WasmDatabaseProof>;
+  setRequireVerifiedDatabaseRoots(requireVerified: boolean): void;
+  installVerifiedDatabaseProof(proof: WasmDatabaseProof): void;
+  queryBatch(scriptHashes: Uint8Array, dbId: number): Promise<any[]>;
+  queryBatchPadded(scriptHashes: Uint8Array, dbId: number, paddedSlots: number): Promise<any[]>;
+  serverUrl(): string;
+  setMetricsRecorder(metrics: WasmAtomicMetrics): void;
   clearMetricsRecorder(): void;
 }
 
@@ -582,60 +800,6 @@ interface AtomicMetricsSnapshot {
  * counters (via an `Arc` clone on the native side), so this single
  * handle aggregates events from an entire PIR deployment.
  */
-/**
- * Opaque WASM handle wrapping the Rust `arc::PresentationState`. Held by
- * `ArcCredentialManager` and mutated by `present()`; serialise / deserialise
- * round-trip the full state through localStorage so a page reload restores
- * the remaining-presentation count without re-fetching the credential from
- * the payment service.
- */
-interface WasmArcPresentationState {
-  free(): void;
-  /** Produce the next presentation; throws once `remaining() === 0n`. */
-  present(): Uint8Array;
-  /** Remaining presentations before the credential is exhausted. */
-  remaining(): bigint;
-  /** Total presentation limit baked into the credential at issue time. */
-  limit(): bigint;
-  /** Current nonce — i.e. how many presentations were already produced. */
-  nonce(): bigint;
-  /** Serialise full state (credential + presCtx + nonce + limit) for persistence. */
-  serialize(): Uint8Array;
-}
-
-/**
- * Opaque WASM handle for the ARC issuance "obtain" leg (pir-sdk-wasm
- * `arc.rs`). Holds the per-request `ClientSecrets` inside WASM so the
- * blinding factors never reach JS.
- */
-interface WasmArcCredentialRequest {
-  free(): void;
-  /** 226-byte `CredentialRequest` to POST to the issuer (`/dev/arc/issue`). */
-  request_bytes(): Uint8Array;
-  /**
-   * Combine the issuer's 99-byte pubkey + 454-byte `CredentialResponse`
-   * into the 131-byte credential blob for `WasmArcPresentationState`.
-   */
-  finalize(pubkeyBytes: Uint8Array, responseBytes: Uint8Array): Uint8Array;
-}
-
-/**
- * Opaque WASM handle for one Cashu blind/unblind (pir-sdk-wasm `cashu.rs`).
- * Holds the blinding scalar + secret inside WASM. Create one per BAT.
- */
-interface WasmCashuBlind {
-  free(): void;
-  /** The Cashu "secret" string (64-char hex) for the authA token. */
-  secret_string(): string;
-  /** 33-byte blinded message `B'` to POST to the mint (`/dev/cashu/mint`). */
-  blinded_message(): Uint8Array;
-  /**
-   * Unblind the mint's 33-byte `C'` with the 33-byte keyset pubkey `K`:
-   * `C = C' − r·K`. Returns the 33-byte unblinded signature.
-   */
-  unblind(keysetPubkey: Uint8Array, signature: Uint8Array): Uint8Array;
-}
-
 interface WasmAtomicMetrics {
   free(): void;
   /**
@@ -656,11 +820,12 @@ interface WasmAtomicMetrics {
   snapshot(): AtomicMetricsSnapshot;
 }
 
-interface WasmQueryResult {
+export interface WasmQueryResult {
   free(): void;
   readonly entryCount: number;
   readonly totalBalance: bigint;
   readonly isWhale: boolean;
+  /** Native release verdict. Constructor/fromJson handles always return false. */
   readonly merkleVerified: boolean;
   /** Returns `{txid: hexString, vout, amountSats}` or `null`. */
   getEntry(index: number): any;
@@ -728,6 +893,53 @@ export async function initSdkWasm(): Promise<boolean> {
  */
 export function isSdkWasmReady(): boolean {
   return sdkWasm !== null;
+}
+
+/** A blinded ARC credential request held in wasm (`WasmArcCredentialRequest`). */
+export interface WasmArcCredentialRequest {
+  epoch(): number;
+  requestBytes(): Uint8Array;
+  secretsBytes(): Uint8Array;
+  finalize(issuerPublicKeyHex: string, response: Uint8Array): Uint8Array;
+  free(): void;
+}
+
+/** A finished ARC credential with its presentation counter (`WasmArcCredential`). */
+export interface WasmArcCredential {
+  epoch(): number;
+  presentationLimit(): number;
+  nextNonce(): number;
+  remaining(): number;
+  present(count: number): Uint8Array;
+  free(): void;
+}
+
+/**
+ * The ARC factories `credits.ts` needs (`ArcRequestFactory` and
+ * `ArcCredentialFactory`), backed by the loaded wasm module. Throws when
+ * the module is not loaded: call `initSdkWasm()` first.
+ */
+export function sdkArcFactories(): {
+  request: {
+    create(epoch: number): WasmArcCredentialRequest;
+    restore(epoch: number, secrets: Uint8Array, request: Uint8Array): WasmArcCredentialRequest;
+  };
+  credential: {
+    open(credential: Uint8Array, epoch: number, presentationLimit: number, nextNonce: number): WasmArcCredential;
+  };
+} {
+  const mod = sdkWasm;
+  if (!mod) throw new Error('SDK WASM is not loaded; credentials need it');
+  return {
+    request: {
+      create: (epoch) => new mod.WasmArcCredentialRequest(epoch),
+      restore: (epoch, secrets, request) => mod.WasmArcCredentialRequest.fromBytes(epoch, secrets, request),
+    },
+    credential: {
+      open: (credential, epoch, presentationLimit, nextNonce) =>
+        new mod.WasmArcCredential(credential, epoch, presentationLimit, nextNonce),
+    },
+  };
 }
 
 // ─── Catalog Conversion ─────────────────────────────────────────────────────
@@ -1221,7 +1433,7 @@ export function requireSdkWasm(): PirSdkWasm {
 // Re-export the adapter-facing interface types so `dpf-adapter.ts` can
 // import them without having to reach into this module's type-only
 // `PirSdkWasm` shape.
-export type { WasmDpfClient, WasmHarmonyClient, WasmQueryResult, WasmDatabaseCatalog };
+export type { WasmDatabaseCatalog };
 
 // ─── Metrics bridge (Phase 2+ observability) ───────────────────────────────
 //
