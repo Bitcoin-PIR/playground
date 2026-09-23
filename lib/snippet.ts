@@ -9,8 +9,8 @@
  *
  * Payments: each snippet wires a credit provider (docs: /docs/sdk/payments).
  * The one shown is an empty wallet: DPF and Direct ORAM run free while the
- * servers have room, and a backend a server charges for (HarmonyPIR hints
- * and OnionPIR on pir1) stops the query with "credits required".
+ * servers have room, and a backend a server charges for (HarmonyPIR and
+ * OnionPIR) stops the query with "credits required".
  */
 
 import type { Backend } from '@/components/BackendSelector';
