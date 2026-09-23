@@ -1,6 +1,7 @@
 'use client';
 
-import type { PlaygroundQueryResult } from '@/lib/playground-clients';
+import Link from 'next/link';
+import { CREDIT_SAT, type PlaygroundQueryResult } from '@/lib/playground-clients';
 import { AttestationBadge } from './AttestationBadge';
 import { OperatorIdentityBadge } from './OperatorIdentityBadge';
 
@@ -10,8 +11,29 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
 
   return (
     <div className="space-y-5">
+      {result.paymentRequired && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          <div className="font-semibold">Payment required</div>
+          <p className="mt-1">
+            A server this backend uses charges credits, and the playground has no wallet yet,
+            so the lookup stopped at the first metered frame. Attestation and identity below
+            are real; no UTXOs were fetched.
+          </p>
+          <p className="mt-1">
+            About {result.paymentRequired.approxCredits} credit
+            {result.paymentRequired.approxCredits === 1 ? '' : 's'} (≈{' '}
+            {result.paymentRequired.approxCredits * CREDIT_SAT} sat) per single-address lookup
+            when every server of this backend charges. The ORAM TEE backend is free today.{' '}
+            <Link href="/docs/sdk/payments" className="underline">
+              How payments work
+            </Link>
+          </p>
+          <p className="mt-2 font-mono text-xs opacity-80">{result.paymentRequired.message}</p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="UTXOs" value={result.utxos.length.toString()} />
+        <Stat label="UTXOs" value={result.paymentRequired ? '—' : result.utxos.length.toString()} />
         <Stat label="balance" value={result.utxos.length ? btc(result.totalSats) : '—'} />
         <Stat label="query" value={`${result.queryElapsedMs.toFixed(0)} ms`} />
         <Stat label="end-to-end" value={`${result.totalElapsedMs.toFixed(0)} ms`} />
@@ -47,9 +69,38 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
         </div>
       )}
 
-      {!result.merkleVerified && (
+      {result.credits.length > 0 && (
+        <div>
+          <div className="mb-2 text-sm font-medium">Credits</div>
+          <ul className="space-y-1 font-mono text-xs">
+            {result.credits.map((c) => (
+              <li key={c.label}>
+                {c.label}:{' '}
+                {c.state === 'required'
+                  ? 'required — metered frames are paid from the wallet'
+                  : c.state === 'not-required'
+                    ? 'accepted, not charged'
+                    : c.state === 'not-enabled'
+                      ? 'free (credits not enabled)'
+                      : `error — ${c.error ?? 'unknown'}`}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {!result.paymentRequired && result.verification === 'attested-oram' && result.merkleVerified && (
+        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+          Direct ORAM has no Merkle proofs: this result comes from the attested SEV-SNP runtime,
+          whose database proof verified in your browser before the lookup (strict mode).
+        </div>
+      )}
+
+      {!result.paymentRequired && !result.merkleVerified && (
         <div className="rounded-md border border-red-400 bg-red-50 px-3 py-2 text-sm text-red-900 dark:bg-red-950 dark:text-red-200">
-          Per-bucket Merkle verification FAILED. Do not trust this result.
+          {result.verification === 'attested-oram'
+            ? 'The database proof did not verify. Do not trust this result.'
+            : 'Per-bucket Merkle verification FAILED. Do not trust this result.'}
         </div>
       )}
 
@@ -61,6 +112,7 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
         </ul>
       )}
 
+      {!result.paymentRequired && (
       <div>
         <div className="mb-2 flex items-baseline justify-between">
           <h3 className="text-sm font-medium">
@@ -109,6 +161,7 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

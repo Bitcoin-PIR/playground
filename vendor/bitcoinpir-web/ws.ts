@@ -18,6 +18,13 @@ export interface ManagedWsConfig {
   requestTimeoutMs?: number;
 }
 
+/** Synchronous record codec installed only after a same-socket handshake.
+ * Both functions receive and return one complete `[u32 len][payload]` frame. */
+export interface ManagedWsFrameCodec {
+  encode(frame: Uint8Array): Uint8Array;
+  decode(frame: Uint8Array): Uint8Array;
+}
+
 type PendingCallback = {
   resolve: (data: Uint8Array) => void;
   reject: (err: Error) => void;
@@ -31,10 +38,10 @@ const PING_MSG = new Uint8Array([1, 0, 0, 0, 0x00]);
 //
 // Cloudflare's WebSocket proxy silently corrupts single messages above
 // ~1 MB (a 3.1 MB OnionPIR RegisterKeys upload arrives truncated — see
-// docs/PIR1_REGISTER_KEYS_TRUNCATION.md). Messages over CHUNK_SIZE are
+// docs/history/PIR1_REGISTER_KEYS_TRUNCATION.md). Messages over CHUNK_SIZE are
 // split into `[4B len][CHUNK_MAGIC][seq:u16 LE][total:u16 LE][piece]`
 // frames; the peer reassembles. Must stay in sync with
-// pir-sdk-client/src/connection.rs and runtime/src/bin/unified_server.rs.
+// crates/sdk/client/src/connection.rs and apps/server/src/bin/unified_server.rs.
 const CHUNK_MAGIC = 0xc7;
 const CHUNK_SIZE = 256 * 1024;
 const CHUNK_HDR = 5; // 1 magic + 2 seq + 2 total
@@ -44,6 +51,7 @@ export class ManagedWebSocket {
   private ws: WebSocket | null = null;
   private pending: PendingCallback[] = [];
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private frameCodec: ManagedWsFrameCodec | null = null;
 
   // Transport-level chunk reassembly state (see CHUNK_MAGIC above).
   private chunkAcc: Uint8Array[] = [];
@@ -75,6 +83,7 @@ export class ManagedWebSocket {
       ws.onopen = () => {
         this.ws = ws;
         this.pending = [];
+        this.frameCodec = null;
         this.chunkAcc = [];
         this.chunkExpected = 0;
         this.chunkTotal = 0;
@@ -102,6 +111,12 @@ export class ManagedWebSocket {
       ws.onclose = () => {
         this.ws = null;
         this.stopHeartbeat();
+        for (const callback of this.pending) {
+          clearTimeout(callback.timeout);
+          callback.reject(new Error(`Connection closed (${label})`));
+        }
+        this.pending = [];
+        this.frameCodec = null;
         this.config.onClose?.();
       };
     });
@@ -113,6 +128,13 @@ export class ManagedWebSocket {
       throw new Error(`Not connected (${this.config.label ?? this.config.url})`);
     }
 
+    let wireMessage: Uint8Array;
+    try {
+      wireMessage = this.frameCodec ? this.frameCodec.encode(msg) : msg;
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+
     return new Promise<Uint8Array>((resolve, reject) => {
       const timeout = setTimeout(() => {
         const idx = this.pending.findIndex(p => p.resolve === resolve);
@@ -122,7 +144,7 @@ export class ManagedWebSocket {
 
       this.pending.push({ resolve, reject, timeout });
       try {
-        this.sendChunked(msg);
+        this.sendChunked(wireMessage);
       } catch (err) {
         clearTimeout(timeout);
         const idx = this.pending.findIndex(p => p.resolve === resolve);
@@ -137,6 +159,16 @@ export class ManagedWebSocket {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
+  /** Atomically switch all subsequent requests, replies and heartbeats to a
+   * same-socket secure record codec. No request may be in flight. */
+  setFrameCodec(codec: ManagedWsFrameCodec): void {
+    if (!this.isOpen()) throw new Error('cannot install frame codec on a closed socket');
+    if (this.pending.length !== 0) {
+      throw new Error('cannot install frame codec while requests are pending');
+    }
+    this.frameCodec = codec;
+  }
+
   /** Gracefully close the connection. */
   disconnect(): void {
     this.stopHeartbeat();
@@ -146,6 +178,7 @@ export class ManagedWebSocket {
       cb.reject(new Error('Disconnected'));
     }
     this.pending = [];
+    this.frameCodec = null;
     this.ws?.close();
     this.ws = null;
   }
@@ -156,7 +189,7 @@ export class ManagedWebSocket {
    * A single WebSocket message may carry one record (the historical
    * shape) or several length-prefixed records concatenated back-to-back
    * — the HarmonyPIR hint coalescing introduced 2026-05-20 (see
-   * `HINT_BATCH_BYTES` in `runtime/src/bin/unified_server.rs`) flushes
+   * `HINT_BATCH_BYTES` in `apps/server/src/bin/unified_server.rs`) flushes
    * ~750 KB of records per WS message. This method peels each
    * `[4B len LE][payload of len bytes]` record off the head of `data`
    * and resolves one pending callback per record. For any non-coalesced
@@ -182,11 +215,33 @@ export class ManagedWebSocket {
         );
         return;
       }
-      const record = data.subarray(off, recordEnd);
+      let record = data.subarray(off, recordEnd);
       off = recordEnd;
+      let recordPayloadLength = len;
+
+      if (this.frameCodec) {
+        try {
+          record = this.frameCodec.decode(record);
+          if (record.length < 5) throw new Error('decoded record is too short');
+          const decodedLength = new DataView(
+            record.buffer,
+            record.byteOffset,
+            4,
+          ).getUint32(0, true);
+          if (decodedLength !== record.length - 4) {
+            throw new Error('decoded record has a non-canonical length prefix');
+          }
+          recordPayloadLength = decodedLength;
+        } catch (error) {
+          const failure = error instanceof Error ? error : new Error(String(error));
+          this.log(`Secure record rejected: ${failure.message}`, 'error');
+          this.disconnect();
+          return;
+        }
+      }
 
       // Filter pong responses: [4B len=1 LE][1B variant=0x00].
-      if (len === 1 && record[4] === 0x00) {
+      if (recordPayloadLength === 1 && record[4] === 0x00) {
         continue; // Silently discard pong
       }
 
@@ -215,8 +270,8 @@ export class ManagedWebSocket {
   /**
    * Accumulate one chunk frame; deliver the reassembled message once the
    * final chunk arrives. Frame layout must match `send_chunked` in
-   * pir-sdk-client/src/connection.rs and `send_resp_chunked` in
-   * runtime/src/bin/unified_server.rs.
+   * crates/sdk/client/src/connection.rs and `send_resp_chunked` in
+   * apps/server/src/bin/unified_server.rs.
    */
   private handleChunkFrame(data: Uint8Array): void {
     const seq = data[5] | (data[6] << 8);
@@ -303,7 +358,16 @@ export class ManagedWebSocket {
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(PING_MSG);
+        try {
+          const ping = this.frameCodec ? this.frameCodec.encode(PING_MSG) : PING_MSG;
+          this.ws.send(ping);
+        } catch (error) {
+          this.log(
+            `Heartbeat framing failed: ${(error as Error)?.message ?? String(error)}`,
+            'error',
+          );
+          this.disconnect();
+        }
       }
     }, this.heartbeatMs);
   }

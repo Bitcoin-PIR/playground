@@ -21,6 +21,7 @@
     "sync-vendor": "bash scripts/sync-vendor.sh"
   },
   "dependencies": {
+    "@cashu/cashu-ts": "4.10.2",
     "@mdx-js/loader": "^3.0.1",
     "@mdx-js/react": "^3.0.1",
     "@monaco-editor/react": "^4.7.0",

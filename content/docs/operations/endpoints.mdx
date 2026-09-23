@@ -6,10 +6,14 @@ the [SDK](/docs/sdk/typescript) handles the routing.
 
 ## The two roles
 
-| Endpoint                          | Short name | Role            | Hardware              | SEV-SNP |
-| --------------------------------- | ---------- | --------------- | --------------------- | ------- |
-| `wss://weikeng1.bitcoinpir.org`   | pir1       | **Hint server** | Hetzner i7-8700       | No      |
-| `wss://weikeng2.bitcoinpir.org`   | pir2       | **Query server**| VPSBG (Tier 3 UKI)    | Yes     |
+| Endpoint                          | Short name | Role            | Hardware              | SEV-SNP | Credits |
+| --------------------------------- | ---------- | --------------- | --------------------- | ------- | ------- |
+| `wss://weikeng1.bitcoinpir.org`   | pir1       | **Hint server** (+ DPF server 0, OnionPIR) | Hetzner i7-8700 | No | Required |
+| `wss://weikeng2.bitcoinpir.org`   | pir2       | **Query server** (+ DPF server 1, Direct ORAM) | VPSBG (Tier 3 UKI) | Yes | Not charged today |
+
+Every metered frame on pir1 is paid in [credits](/docs/sdk/payments), so
+DPF, HarmonyPIR and OnionPIR need a credit provider; Direct ORAM only
+talks to pir2 and is the free path today.
 
 This split is intentional. The query server — the one that sees the
 per-query traffic — runs on attested hardware with the strongest
@@ -38,6 +42,7 @@ nothing about which addresses are queried.
                   │ pir2 (VPSBG, SEV-SNP)     │
                   │   - DPF server 1          │
                   │   - HarmonyPIR query srv  │
+                  │   - Direct ORAM (TEE)     │
                   │   (no OnionPIR — runs     │
                   │    on pir1 only)          │
                   └───────────────────────────┘
@@ -100,6 +105,24 @@ OnionPIR. In the current reference deployment that's `pir1` — `pir2`
 runs `--serve-queries` only and does not serve OnionPIR. Check
 [attest-pin.ts](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/attest-pin.ts)
 for the canonical config.
+
+### Direct ORAM
+
+Direct ORAM is single-server too and runs only on `pir2`, inside the
+SEV-SNP guest: the server process sees the script hash, the host does
+not. Use the strict client with the production request shape — every
+lookup is one fixed-budget ORAM access with 25 padded slots:
+
+```ts
+import { OramPirClientAdapter, PIR2_PROVIDER, PRODUCTION_ORAM_BATCH_PLANNER } from 'bitcoin-pir-web';
+
+new OramPirClientAdapter({
+  serverUrl: PIR2_PROVIDER.endpoint,        // wss://weikeng2.bitcoinpir.org
+  strictVerification: true,                 // attestation + identity + DB proof, fail closed
+  batchPlanner: PRODUCTION_ORAM_BATCH_PLANNER,
+  // …pins: see the playground's ORAM snippet
+});
+```
 
 ## Reading from the right server
 

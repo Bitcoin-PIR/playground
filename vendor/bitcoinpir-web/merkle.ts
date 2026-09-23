@@ -2,7 +2,7 @@
  * Client-side Merkle tree hashing primitives for PIR responses.
  *
  * Uses SHA-256 from hash.js (same as the rest of the web client).
- * Implements the same N-ary Merkle tree logic as pir-core/src/merkle.rs.
+ * Implements the same N-ary Merkle tree logic as crates/protocol/core/src/merkle.rs.
  *
  * Only the hashing helpers live here. The actual proof walks are
  * backend-specific: DPF / HarmonyPIR verify in Rust via the WASM
@@ -11,7 +11,7 @@
  * splice the verified child into its parent at `idx % arity` — a property
  * the previously-exported `verifyMerkleProof` did not have, so it was
  * removed (it never bound the leaf into the recomputed root). See
- * docs/CODE_REVIEW_2026-06.md W1.
+ * docs/history/CODE_REVIEW_2026-06.md W1.
  */
 
 import { sha256 } from './hash.js';

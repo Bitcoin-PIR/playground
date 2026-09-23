@@ -1,0 +1,151 @@
+# Payments (credits)
+
+Lookups on the reference deployment are paid in **credits**. A wallet
+buys a credential once over Lightning and then spends it one frame at a
+time; the servers never learn who bought it, and nothing links a lookup to
+a purchase. The design and the rate card live in
+[`docs/CREDITS.md`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/docs/CREDITS.md)
+in the main repo; this page is the wallet-side view.
+
+## Who charges today
+
+| Server | Serves | Credits |
+| --- | --- | --- |
+| `pir1` — `wss://weikeng1.bitcoinpir.org` | DPF server 0, HarmonyPIR hints, OnionPIR | **Required** for every metered frame |
+| `pir2` — `wss://weikeng2.bitcoinpir.org` | DPF server 1, HarmonyPIR queries, Direct ORAM | Not charged today |
+
+So **Direct ORAM (the ORAM TEE backend) is the free path today**: it only
+talks to pir2. DPF, HarmonyPIR and OnionPIR all touch pir1 and need
+credits. A server tells the client which case applies in its
+`GET_INFO_JSON` answer (`"credits": { "enabled", "required" }`); the SDK
+reads it for you.
+
+<Callout kind="note" title="Try it without paying">
+The [playground](/playground) runs the ORAM TEE backend for free. For the
+three PIR backends it shows exactly where a lookup stops without credits.
+</Callout>
+
+## Price
+
+| | |
+| --- | --- |
+| 1 credit | 10 sat |
+| Pack | 100 credits for 1,000 sat, over Lightning |
+| Credential lifetime | until the end of the 90-day epoch it was bought in, plus 30 days |
+
+Rate card for one single-address lookup, when both servers of a backend
+charge (docs/CREDITS.md): DPF ≈ 2, HarmonyPIR ≈ 5 (fresh hint set),
+OnionPIR ≈ 10, Direct ORAM ≈ 1 credits. Servers meter real work in gas
+(1 credit = 72,000 gas; a fixed 20 gas per frame plus 1,000 gas per MB of
+response), so a batch costs less per address than a single lookup.
+
+## How it works
+
+1. **Buy.** The wallet asks the Cashu mint (`https://mint.bitcoinpir.org`)
+   for a Lightning invoice, pays it, mints ecash, and trades the ecash at
+   the issuer (`https://cashier.bitcoinpir.org`, `POST /v2/credentials`)
+   for a **blindly signed ARC credential** worth 100 presentations.
+2. **Spend.** After the sealed channel is up, the client presents credits
+   on each connection that needs them (`REQ_CREDIT_PRESENT`, opcode
+   `0x12`, only accepted inside the encrypted channel). A presentation is
+   one unlinkable use of the credential.
+3. **Settle.** The server forwards the presentation to the issuer
+   (`/v2/redeem`), which checks it, rejects double spends, and credits the
+   connection with gas. The server then serves metered frames until the
+   balance runs out; the client tops up transparently.
+
+What each party sees: the mint sees the invoice and the buyer's network
+address; the issuer sees the ecash, the blinded request and the buyer's
+network address at purchase, and later which server redeemed a
+presentation and when; a server sees the connection and the
+presentation. Presentations are unlinkable to the purchase (blind
+signatures), and PIR hides the query contents from everyone regardless.
+
+## In the SDK
+
+Every client takes a **credit provider**: a function that returns a
+presentation worth at least `credits` credits, or `null` when the wallet
+is empty.
+
+```ts
+type CreditProvider = (credits: number) =>
+  { kind: number; payload: Uint8Array; credits: number } | null;
+```
+
+### WASM clients (DPF, HarmonyPIR, Direct ORAM)
+
+Call `enableCredits` **after** the sealed channel (presentations are
+bearer material). It reads the server's flags and, where credits are
+required, funds that connection's metered frames from the provider:
+
+```ts
+await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);
+
+// 'not-enabled' | 'not-required' | 'required'
+const s0 = await client.enableCredits(0, wallet.present.bind(wallet)); // pir1
+const s1 = await client.enableCredits(1, wallet.present.bind(wallet)); // pir2
+```
+
+`WasmOramClient.enableCredits(provider)` takes no server index (one
+server). With an empty provider, a server that requires credits refuses
+the first metered frame with `credits required: this frame needs N more
+credit(s) and the wallet has none`.
+
+### TypeScript adapters and the OnionPIR client
+
+`OnionPirWebClient`, `OramPirClientAdapter` and the DPF / HarmonyPIR
+adapters in `bitcoin-pir-web` take the provider as a config field and
+report what each server decided:
+
+```ts
+new OramPirClientAdapter({
+  ...config,
+  creditProvider: wallet.present.bind(wallet),
+  onCredits: (status) => console.log('credits', status.state),
+});
+```
+
+### A wallet
+
+`bitcoin-pir-web` ships the browser wallet the reference site uses:
+
+```ts
+import {
+  IssuerClient, CreditStore, CreditWallet,
+  purchaseCredential, cashuLightningRail, sdkArcFactories,
+  PRODUCTION_CASHIER_URL,
+} from 'bitcoin-pir-web';
+
+const issuer = new IssuerClient(PRODUCTION_CASHIER_URL);
+const store = new CreditStore();                 // localStorage
+const info = await issuer.info();                // offers, mints, ARC key
+
+// Buy one pack: shows the invoice through `onInvoice`, waits for payment,
+// mints the ecash, has the issuer sign a blinded credential, stores it.
+await purchaseCredential(
+  issuer, store, sdkArcFactories().request, cashuLightningRail(),
+  info.offers[0], info.mints[0],
+  { onInvoice: (bolt11) => showInvoice(bolt11) },
+);
+
+const wallet = new CreditWallet(store, sdkArcFactories().credential);
+// wallet.present is the credit provider.
+```
+
+The purchase is resumable: if the page closes after payment, the minted
+token stays in the store and `purchaseCredential` finishes it next time.
+The credential's secrets live only where the store keeps them — clear
+that storage and the unspent credits are gone, by design.
+
+<Callout kind="warn" title="Browser origin">
+The issuer answers cross-origin requests only from origins it lists, so
+a wallet served from another origin needs to be added on the issuer
+(`cors_origins`) before it can buy credentials in the browser.
+</Callout>
+
+### Rust
+
+`pir_sdk_client::credit_transport` has the same shape: implement
+`CreditProvider` (`present(&self, credits) -> PirResult<Option<Presentation>>`)
+and call the client's `enable_credits(server_index, provider)` after the
+secure-channel upgrade.

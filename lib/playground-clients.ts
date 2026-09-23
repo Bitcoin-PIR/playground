@@ -1,20 +1,26 @@
 'use client';
 
 /**
- * Playground-level wrapper around the three PIR backends.
+ * Playground-level wrapper around the four backends.
  *
- * Each backend (DPF / HarmonyPIR / OnionPIR) is exercised end-to-end:
+ * Each backend (DPF / HarmonyPIR / OnionPIR / Direct ORAM) is exercised
+ * end-to-end:
  *   1. open WS connection(s),
  *   2. attest each server, cross-check against the operator-pinned values,
- *   3. (where supported) upgrade to the AEAD-sealed channel,
- *   4. run a single-scripthash batch query,
- *   5. tear down.
+ *   3. upgrade to the AEAD-sealed channel and check the operator-signed
+ *      identity of each server against its own pinned operator key,
+ *   4. enable credits (docs/CREDITS.md in the main repo) with the caller's
+ *      credit provider — the playground has no wallet yet, so its provider is
+ *      empty and a server that requires credits stops the query with a clear
+ *      "payment required" result,
+ *   5. run a single-scripthash batch query and verify it,
+ *   6. tear down.
  *
  * The privacy invariants (K=75 INDEX / K_CHUNK=80 CHUNK padding, INDEX item-
- * count symmetry, CHUNK round-presence symmetry, Harmony per-group T-1 count)
- * are owned by the vendored client code — this wrapper is just orchestration
- * and cannot bypass them. There is NO `skipPadding` toggle and there will
- * never be one.
+ * count symmetry, CHUNK round-presence symmetry, Harmony per-group T-1 count,
+ * the fixed-budget ORAM request shape) are owned by the vendored client code —
+ * this wrapper is just orchestration and cannot bypass them. There is NO
+ * `skipPadding` toggle and there will never be one.
  */
 
 import { loadWasm } from './wasm-loader';
@@ -23,12 +29,23 @@ import {
   AMD_TURIN_ARK_FINGERPRINT,
   PIR1_PIN,
   PIR2_TIER3_PIN,
-  PIR_OPERATOR_PUBKEY,
+  PRODUCTION_ORAM_DB_PROOF_V2_PINS,
   type ServerAttestPin,
 } from '@vendor/web/attest-pin';
-import { gateOperatorIdentity, type OperatorIdentity } from '@vendor/web/dpf-adapter';
+import {
+  gateOperatorIdentity,
+  type OperatorIdentity,
+  type ServerAttestation,
+} from '@vendor/web/dpf-adapter';
 import type { WasmAnnounceVerification } from '@vendor/web/sdk-bridge';
 import { OnionPirWebClient } from '@vendor/web/onionpir_client';
+import { OramPirClientAdapter } from '@vendor/web/oram-adapter';
+import {
+  PIR1_PROVIDER,
+  PIR2_PROVIDER,
+  PRODUCTION_ORAM_BATCH_PLANNER,
+} from '@vendor/web/production-providers';
+import type { CreditEnablement, CreditProvider } from '@vendor/web/credits';
 import type { QueryResult, UtxoEntry } from '@vendor/web/types';
 import type { Backend } from '@/components/BackendSelector';
 
@@ -37,7 +54,7 @@ import type { Backend } from '@/components/BackendSelector';
 export interface AttestationSummary {
   /** Which server. */
   url: string;
-  /** Free-form label ("hint" / "query" / "OnionPIR"). */
+  /** Free-form label ("hint" / "query" / "OnionPIR" / "ORAM"). */
   label: string;
   /** State: `verified-vcek` is the strongest, `unsupported` means no SEV (Hetzner). */
   state: 'verified' | 'verified-vcek' | 'unsupported' | 'mismatch' | 'error';
@@ -57,14 +74,49 @@ export interface AttestationSummary {
  * Per-server operator-signed-identity (REQ_ANNOUNCE) verdict, paired with
  * the connection-order label. `identity.state === 'verified'` means the
  * server's announce bundle passed the operator-pin + cert-signature +
- * validity + chain + channel-binding checks against the pinned operator
- * key. Gate any "verified operator" UI on that state alone.
+ * validity + chain + channel-binding checks against that server's pinned
+ * operator key (pir1 and pir2 are endorsed by different operator keys).
+ * Gate any "verified operator" UI on that state alone.
  */
 export interface OperatorIdentitySummary {
   /** Connection-order label, matching `AttestationSummary.label`. */
   label: string;
   identity: OperatorIdentity;
 }
+
+/**
+ * Credits (paid queries) on one server: `required` means its metered frames
+ * are paid from the credit provider, `not-enabled` / `not-required` mean the
+ * server is free today.
+ */
+export interface CreditsSummary {
+  label: string;
+  state: CreditEnablement['state'];
+  error?: string;
+}
+
+/**
+ * A server that requires credits refused the query because the credit
+ * provider had none. The rest of the result (attestation, identity, credits
+ * states) is still real; there are no UTXOs.
+ */
+export interface PaymentRequired {
+  /** Server-side message, verbatim. */
+  message: string;
+  /** Rate-card estimate for one single-address lookup on this backend. */
+  approxCredits: number;
+}
+
+/** Credits per single-address lookup, from the rate card (docs/CREDITS.md). */
+export const RATE_CARD_CREDITS: Record<Backend, number> = {
+  dpf: 2,
+  harmonypir: 5,
+  onionpir: 10,
+  oram: 1,
+};
+
+/** 1 credit = 10 sat (issuer `/v2/info` `credit_sat`). */
+export const CREDIT_SAT = 10;
 
 export interface PlaygroundUtxo {
   /** TXID in display order (RPC / explorer convention). */
@@ -91,18 +143,41 @@ export interface PlaygroundQueryResult {
   /** True if the address was excluded from the DB as a "whale" (too many UTXOs). */
   isWhale: boolean;
   /**
-   * Bucket-Merkle verification result. `true` = proof passed (or DB doesn't
-   * publish Merkle commitments). `false` = a proof failed — treat the
-   * result as untrusted.
+   * How the result is authenticated. `merkle`: per-bucket Merkle proofs
+   * checked against the published roots (DPF / HarmonyPIR / OnionPIR).
+   * `attested-oram`: Direct ORAM has no Merkle proofs; the result comes from
+   * the attested SEV-SNP runtime whose database proof verified in the browser.
    */
+  verification: 'merkle' | 'attested-oram';
+  /** `true` when the verification above passed. `false` = untrusted result. */
   merkleVerified: boolean;
   /** Per-server attestation, in connection order. */
   attestation: AttestationSummary[];
-  /** Per-server operator-signed-identity verdict, in connection order.
-   *  Empty for backends without a secure channel (OnionPIR). */
+  /** Per-server operator-signed-identity verdict, in connection order. */
   operatorIdentity: OperatorIdentitySummary[];
+  /** Per-server credits state, in connection order. */
+  credits: CreditsSummary[];
+  /** Set when a server that requires credits refused the query. */
+  paymentRequired?: PaymentRequired;
   /** Backend-specific notes (e.g. "Hint server attestation skipped — Hetzner has no SEV"). */
   notes: string[];
+}
+
+export interface PlaygroundQueryOptions {
+  /**
+   * Credits for servers that require them. Omitted = no wallet (the
+   * playground today): the provider hands out nothing.
+   */
+  creditProvider?: CreditProvider;
+}
+
+/** The playground's wallet today: empty. */
+const NO_CREDITS: CreditProvider = () => null;
+
+const CREDITS_REFUSAL = /credits required|insufficient gas|REQ_CREDIT_PRESENT/i;
+
+function errorMessage(e: unknown): string {
+  return (e as Error)?.message ?? String(e);
 }
 
 // ── Internal: attestation helper used by DPF + Harmony WASM clients ───────
@@ -121,11 +196,21 @@ interface ClientWithAttest {
   }>;
   upgradeToSecureChannel(pub0: Uint8Array, pub1: Uint8Array): Promise<void>;
   announce(serverIndex: number): Promise<WasmAnnounceVerification>;
+  enableCredits(serverIndex: number, provider: CreditProvider): Promise<string>;
+}
+
+interface ServerLeg {
+  url: string;
+  label: string;
+  pin: ServerAttestPin;
+  index: 0 | 1;
+  operatorPubkey: Uint8Array;
+  stableServerId: string;
 }
 
 async function attestAndUpgrade(
   client: ClientWithAttest,
-  servers: { url: string; label: string; pin: ServerAttestPin; index: 0 | 1 }[],
+  servers: ServerLeg[],
 ): Promise<{
   attestation: AttestationSummary[];
   channelUpgraded: boolean;
@@ -165,7 +250,7 @@ async function attestAndUpgrade(
         detail = pinError;
       } else if (noSev) {
         state = 'unsupported';
-        detail = 'No SEV-SNP on this host (Hetzner i7-8700)';
+        detail = 'No SEV-SNP on this host (Hetzner i7-8700); binary pin only';
       } else if (!matched) {
         state = 'mismatch';
         detail = `sevStatus=${v.sevStatus}`;
@@ -176,7 +261,7 @@ async function attestAndUpgrade(
         state = 'verified';
         detail = `SEV-SNP REPORT_DATA matches (binary=${v.binarySha256Hex.slice(0, 8)}…)`;
 
-        // Slice D.3: AMD VCEK chain
+        // AMD VCEK chain
         if (v.hasVcekChain) {
           try {
             v.verifyVcekChain(AMD_TURIN_ARK_FINGERPRINT);
@@ -184,7 +269,7 @@ async function attestAndUpgrade(
             detail = `AMD VCEK chain validated, binary=${v.binarySha256Hex.slice(0, 8)}…`;
           } catch (e) {
             state = 'mismatch';
-            detail = `VCEK chain failed: ${(e as Error)?.message ?? e}`;
+            detail = `VCEK chain failed: ${errorMessage(e)}`;
           }
         }
       }
@@ -200,14 +285,14 @@ async function attestAndUpgrade(
         pin: s.pin,
       });
 
-      handles.push(allZero ? null : { pub: v.serverStaticPub.slice() });
+      handles.push(allZero || state === 'mismatch' ? null : { pub: v.serverStaticPub.slice() });
       v.free();
     } catch (e) {
       att.push({
         url: s.url,
         label: s.label,
         state: 'error',
-        detail: `attest threw: ${(e as Error)?.message ?? e}`,
+        detail: `attest threw: ${errorMessage(e)}`,
         pin: s.pin,
       });
       handles.push(null);
@@ -216,22 +301,16 @@ async function attestAndUpgrade(
 
   // Upgrade to the AEAD-sealed channel only when BOTH servers cleared.
   let channelUpgraded = false;
-  const canUpgrade = (s: AttestationSummary['state']) =>
-    s === 'verified' || s === 'verified-vcek' || s === 'unsupported';
-  if (
-    att.every((a) => canUpgrade(a.state)) &&
-    handles[0] &&
-    handles[1]
-  ) {
+  if (handles[0] && handles[1]) {
     try {
       await client.upgradeToSecureChannel(handles[0].pub, handles[1].pub);
       channelUpgraded = true;
     } catch (e) {
       // Mark both as mismatch since the channel didn't actually come up.
       for (const a of att) {
-        if (a.state === 'verified' || a.state === 'verified-vcek') {
+        if (a.state === 'verified' || a.state === 'verified-vcek' || a.state === 'unsupported') {
           a.state = 'mismatch';
-          a.detail = `channel upgrade failed: ${(e as Error)?.message ?? e}`;
+          a.detail = `channel upgrade failed: ${errorMessage(e)}`;
         }
       }
     }
@@ -239,12 +318,13 @@ async function attestAndUpgrade(
 
   // Operator-signed identity (REQ_ANNOUNCE), verified after the channel
   // decision (mirrors BatchPirClientAdapter). Binds each bundle against the
-  // attested channel key captured in `handles`; gate the badge on 'verified'.
+  // attested channel key captured in `handles` and that server's own
+  // operator key; gate the badge on 'verified'.
   const operatorIdentity: OperatorIdentitySummary[] = [];
   for (let i = 0; i < servers.length; i++) {
     operatorIdentity.push({
       label: servers[i].label,
-      identity: await verifyOperatorIdentityOne(client, servers[i].index, handles[i]),
+      identity: await verifyOperatorIdentityOne(client, servers[i], handles[i]),
     });
   }
 
@@ -259,7 +339,7 @@ async function attestAndUpgrade(
  */
 async function verifyOperatorIdentityOne(
   client: ClientWithAttest,
-  idx: number,
+  server: ServerLeg,
   handle: { pub: Uint8Array } | null,
 ): Promise<OperatorIdentity> {
   if (!handle) {
@@ -267,9 +347,9 @@ async function verifyOperatorIdentityOne(
   }
   let v: WasmAnnounceVerification;
   try {
-    v = await client.announce(idx);
+    v = await client.announce(server.index);
   } catch (e) {
-    const msg = (e as Error)?.message ?? String(e);
+    const msg = errorMessage(e);
     // A server started without --identity-* answers "announce not
     // configured" — an expected, benign state.
     if (/not configured/i.test(msg)) return { state: 'unconfigured' };
@@ -278,10 +358,45 @@ async function verifyOperatorIdentityOne(
   try {
     const nowSecs = BigInt(Math.floor(Date.now() / 1000));
     // maxAge 0n: only the future-dated guard runs (issued_at = boot time).
-    return gateOperatorIdentity(v, PIR_OPERATOR_PUBKEY, handle.pub, nowSecs, 0n);
+    const identity = gateOperatorIdentity(v, server.operatorPubkey, handle.pub, nowSecs, 0n);
+    if (identity.state === 'verified' && identity.serverId !== server.stableServerId) {
+      return {
+        ...identity,
+        state: 'unverified',
+        error: `server_id ${identity.serverId ?? '?'} is not the pinned ${server.stableServerId}`,
+      };
+    }
+    return identity;
   } finally {
     v.free();
   }
+}
+
+/**
+ * Read each server's credits flags and, where credits are required, route
+ * its metered frames through `provider`. Needs the sealed channel
+ * (presentations are bearer material); never throws.
+ */
+async function enableCreditsOnAll(
+  client: ClientWithAttest,
+  servers: ServerLeg[],
+  channelUpgraded: boolean,
+  provider: CreditProvider,
+): Promise<CreditsSummary[]> {
+  const out: CreditsSummary[] = [];
+  for (const s of servers) {
+    if (!channelUpgraded) {
+      out.push({ label: s.label, state: 'error', error: 'no sealed channel' });
+      continue;
+    }
+    try {
+      const state = (await client.enableCredits(s.index, provider)) as CreditsSummary['state'];
+      out.push({ label: s.label, state });
+    } catch (e) {
+      out.push({ label: s.label, state: 'error', error: errorMessage(e) });
+    }
+  }
+  return out;
 }
 
 // ── WasmQueryResult -> PlaygroundQueryResult ──────────────────────────────
@@ -297,10 +412,8 @@ function translateWasmEntries(wqr: {
     const e = wqr.getEntry(i);
     if (!e) continue;
     // WASM packs txid as raw 32-byte internal order — reverse for display.
-    const txidLE = e.txid;
-    const txidDisplay = reverseHex(txidLE);
     utxos.push({
-      txidHex: txidDisplay,
+      txidHex: reverseHex(e.txid),
       vout: Number(e.vout),
       amountSats: BigInt(e.amountSats ?? e.amount ?? 0),
     });
@@ -320,56 +433,105 @@ function reverseHex(hex: string): string {
   return out;
 }
 
-// ── DPF backend ───────────────────────────────────────────────────────────
+/** The part of a result that exists before (or without) the query. */
+type SessionFacts = Pick<
+  PlaygroundQueryResult,
+  'attestation' | 'operatorIdentity' | 'credits' | 'notes'
+>;
 
-export async function runDpfQuery(
+function paymentRequiredResult(
+  backend: Backend,
   scriptHash: Uint8Array,
   scriptPubKeyHex: string,
+  t0: number,
+  facts: SessionFacts,
+  verification: PlaygroundQueryResult['verification'],
+  message: string,
+): PlaygroundQueryResult {
+  return {
+    backend,
+    scriptPubKeyHex,
+    scriptHashHex: bytesToHex(scriptHash),
+    totalElapsedMs: performance.now() - t0,
+    queryElapsedMs: 0,
+    utxos: [],
+    totalSats: 0n,
+    isWhale: false,
+    verification,
+    merkleVerified: true,
+    ...facts,
+    paymentRequired: { message, approxCredits: RATE_CARD_CREDITS[backend] },
+  };
+}
+
+// ── DPF + HarmonyPIR (wasm clients) ───────────────────────────────────────
+
+interface WasmTwoServerClient extends ClientWithAttest {
+  connect(): Promise<void>;
+  fetchCatalog(): Promise<{ free?: () => void }>;
+  queryBatchVerified(scriptHashes: Uint8Array, dbId: number): Promise<unknown>;
+  disconnect(): Promise<void>;
+  free?: () => void;
+}
+
+async function runTwoServerQuery(
+  backend: 'dpf' | 'harmonypir',
+  client: WasmTwoServerClient,
+  servers: ServerLeg[],
+  scriptHash: Uint8Array,
+  scriptPubKeyHex: string,
+  options: PlaygroundQueryOptions,
+  extraNotes: string[],
 ): Promise<PlaygroundQueryResult> {
-  const wasm = await loadWasm();
   const t0 = performance.now();
-  const client = new wasm.WasmDpfClient(PIR1_URL, PIR2_URL);
-  const notes: string[] = [];
+  const notes: string[] = [...extraNotes];
   try {
     await client.connect();
 
-    const { attestation, operatorIdentity } = await attestAndUpgrade(client as unknown as ClientWithAttest, [
-      { url: PIR1_URL, label: 'hint (pir1)', pin: PIR1_PIN, index: 0 },
-      { url: PIR2_URL, label: 'query (pir2)', pin: PIR2_TIER3_PIN, index: 1 },
-    ]);
+    const { attestation, channelUpgraded, operatorIdentity } = await attestAndUpgrade(
+      client,
+      servers,
+    );
+    if (!channelUpgraded) {
+      throw new Error('attestation did not clear both servers; refusing to query over an unsealed channel');
+    }
+    const credits = await enableCreditsOnAll(
+      client,
+      servers,
+      channelUpgraded,
+      options.creditProvider ?? NO_CREDITS,
+    );
+    const facts: SessionFacts = { attestation, operatorIdentity, credits, notes };
 
-    // Catalog warms the native-side state that `queryBatchRaw` needs to
-    // resolve `db_id` against. Without this, the next call errors with
-    // "invalid state: no catalog".
+    // Catalog warms the native-side state the query resolves `db_id` against.
     const catalog = await client.fetchCatalog();
     catalog.free?.();
 
-    const packed = new Uint8Array(20);
-    packed.set(scriptHash, 0);
-
     const qStart = performance.now();
-    const wqrs = (await client.queryBatchRaw(packed, 0)) as any[];
+    let wqrs: any[];
+    try {
+      // Query + per-bucket Merkle verification in one all-or-nothing call:
+      // it returns only when every result verified against the published
+      // tree tops (not-found results included, as absence proofs).
+      wqrs = (await client.queryBatchVerified(scriptHash, 0)) as any[];
+    } catch (e) {
+      const msg = errorMessage(e);
+      if (CREDITS_REFUSAL.test(msg)) {
+        return paymentRequiredResult(backend, scriptHash, scriptPubKeyHex, t0, facts, 'merkle', msg);
+      }
+      throw e;
+    }
+    const qElapsed = performance.now() - qStart;
 
     if (wqrs.length !== 1) {
       throw new Error(`Expected 1 result, got ${wqrs.length}`);
     }
     const wqr = wqrs[0];
-    // queryBatchRaw is the inspector path — Merkle is skipped. Drive a
-    // real verification round through `verifyMerkleBatch` so the result
-    // panel reflects an actual verdict, not the default-true placeholder.
-    const jsonArr = wqrs.map((w: any) => w.toJson());
-    const merkleVerified = await runMerkleBatch(
-      () => (client as any).verifyMerkleBatch(jsonArr, 0),
-      notes,
-    );
-    const qElapsed = performance.now() - qStart;
-
     const { utxos, totalSats, isWhale } = translateWasmEntries(wqr);
     if (typeof wqr.free === 'function') wqr.free();
 
     return {
-      backend: 'dpf',
-      operatorIdentity,
+      backend,
       scriptPubKeyHex,
       scriptHashHex: bytesToHex(scriptHash),
       totalElapsedMs: performance.now() - t0,
@@ -377,9 +539,9 @@ export async function runDpfQuery(
       utxos,
       totalSats,
       isWhale,
-      merkleVerified,
-      attestation,
-      notes,
+      verification: 'merkle',
+      merkleVerified: true,
+      ...facts,
     };
   } finally {
     try {
@@ -389,73 +551,58 @@ export async function runDpfQuery(
   }
 }
 
-// ── HarmonyPIR backend ────────────────────────────────────────────────────
+const PIR1_LEG = (label: string, url: string): ServerLeg => ({
+  url,
+  label,
+  pin: PIR1_PIN,
+  index: 0,
+  operatorPubkey: PIR1_PROVIDER.operatorPubkey,
+  stableServerId: PIR1_PROVIDER.stableServerId,
+});
+
+const PIR2_LEG = (label: string, url: string): ServerLeg => ({
+  url,
+  label,
+  pin: PIR2_TIER3_PIN,
+  index: 1,
+  operatorPubkey: PIR2_PROVIDER.operatorPubkey,
+  stableServerId: PIR2_PROVIDER.stableServerId,
+});
+
+export async function runDpfQuery(
+  scriptHash: Uint8Array,
+  scriptPubKeyHex: string,
+  options: PlaygroundQueryOptions = {},
+): Promise<PlaygroundQueryResult> {
+  const wasm = await loadWasm();
+  const client = new wasm.WasmDpfClient(PIR1_URL, PIR2_URL);
+  return runTwoServerQuery(
+    'dpf',
+    client as unknown as WasmTwoServerClient,
+    [PIR1_LEG('server0 (pir1)', PIR1_URL), PIR2_LEG('server1 (pir2)', PIR2_URL)],
+    scriptHash,
+    scriptPubKeyHex,
+    options,
+    [],
+  );
+}
 
 export async function runHarmonyQuery(
   scriptHash: Uint8Array,
   scriptPubKeyHex: string,
+  options: PlaygroundQueryOptions = {},
 ): Promise<PlaygroundQueryResult> {
   const wasm = await loadWasm();
-  const t0 = performance.now();
   const client = new wasm.WasmHarmonyClient(HINT_URL, QUERY_URL);
-  const notes: string[] = [];
-  try {
-    await client.connect();
-
-    const { attestation, operatorIdentity } = await attestAndUpgrade(client as unknown as ClientWithAttest, [
-      { url: HINT_URL, label: 'hint (pir1)', pin: PIR1_PIN, index: 0 },
-      { url: QUERY_URL, label: 'query (pir2)', pin: PIR2_TIER3_PIN, index: 1 },
-    ]);
-
-    // Warm up the catalog so `queryBatchRaw` can resolve db_id.
-    const catalog = await client.fetchCatalog();
-    catalog.free?.();
-
-    const packed = new Uint8Array(20);
-    packed.set(scriptHash, 0);
-
-    const qStart = performance.now();
-    const wqrs = (await client.queryBatchRaw(packed, 0)) as any[];
-
-    if (wqrs.length !== 1) {
-      throw new Error(`Expected 1 result, got ${wqrs.length}`);
-    }
-    const wqr = wqrs[0];
-    // Same inspector-path caveat as DPF — drive a real Merkle round.
-    const jsonArr = wqrs.map((w: any) => w.toJson());
-    const merkleVerified = await runMerkleBatch(
-      () => (client as any).verifyMerkleBatch(jsonArr, 0),
-      notes,
-    );
-    const qElapsed = performance.now() - qStart;
-
-    const { utxos, totalSats, isWhale } = translateWasmEntries(wqr);
-    if (typeof wqr.free === 'function') wqr.free();
-
-    notes.push(
-      'HarmonyPIR fetches a one-time hint pool (~50 MB) from the hint server before queries.',
-    );
-
-    return {
-      backend: 'harmonypir',
-      operatorIdentity,
-      scriptPubKeyHex,
-      scriptHashHex: bytesToHex(scriptHash),
-      totalElapsedMs: performance.now() - t0,
-      queryElapsedMs: qElapsed,
-      utxos,
-      totalSats,
-      isWhale,
-      merkleVerified,
-      attestation,
-      notes,
-    };
-  } finally {
-    try {
-      await client.disconnect();
-    } catch {}
-    client.free?.();
-  }
+  return runTwoServerQuery(
+    'harmonypir',
+    client as unknown as WasmTwoServerClient,
+    [PIR1_LEG('hint (pir1)', HINT_URL), PIR2_LEG('query (pir2)', QUERY_URL)],
+    scriptHash,
+    scriptPubKeyHex,
+    options,
+    ['HarmonyPIR fetches a one-time hint set (~140 MB) from the hint server before queries.'],
+  );
 }
 
 // ── OnionPIR backend (hand-rolled TS client) ──────────────────────────────
@@ -476,12 +623,9 @@ export async function ensureOnionWasmFactory(): Promise<void> {
   if (g.__onionpirWasmFactory) return;
   // `webpackIgnore: true` tells webpack to leave the import alone; the
   // browser's native ESM loader fetches the .mjs from /public/wasm/.
-  // The site now serves from the root of sdk.bitcoinpir.org (custom
-  // domain — see next.config.mjs), so `NEXT_PUBLIC_BASE_PATH` is the
-  // empty string and the resolved URL is just `/wasm/...`. The `?? ''`
-  // is defensive in case anyone ever reverts to the bitcoin-pir.github.io/playground/
-  // subpath, in which case basePath would be `/playground` and the
-  // URL `${basePath}/wasm/...` still resolves correctly.
+  // The site serves from the root of sdk.bitcoinpir.org (custom domain —
+  // see next.config.mjs), so `NEXT_PUBLIC_BASE_PATH` is the empty string and
+  // the resolved URL is just `/wasm/...`.
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
   const url = `${basePath}/wasm/onionpir_client.mjs`;
   const mod = (await import(/* webpackIgnore: true */ /* @vite-ignore */ url)) as {
@@ -490,56 +634,115 @@ export async function ensureOnionWasmFactory(): Promise<void> {
   g.__onionpirWasmFactory = mod.default;
 }
 
+function summarizeAdapterAttestation(
+  url: string,
+  label: string,
+  pin: ServerAttestPin,
+  a: ServerAttestation | null,
+): AttestationSummary {
+  if (!a || a.state === 'unattested') {
+    return { url, label, state: 'error', detail: 'server was not attested', pin };
+  }
+  const base = {
+    url,
+    label,
+    pin,
+    binarySha256Hex: a.binarySha256Hex,
+    gitRev: a.gitRev,
+    launchMeasurementHex: a.launchMeasurementHex,
+  };
+  if (a.state === 'mismatch' || a.state === 'plaintext') {
+    return { ...base, state: 'mismatch', detail: `attestation ${a.state} (sevStatus=${a.sevStatus ?? '?'})` };
+  }
+  if (a.sevStatus === 'noSevHost') {
+    return {
+      ...base,
+      state: 'unsupported',
+      detail: 'No SEV-SNP on this host (Hetzner i7-8700); binary pin only',
+    };
+  }
+  if (a.state === 'verified-vcek') {
+    return {
+      ...base,
+      state: 'verified-vcek',
+      detail: `AMD VCEK chain validated, binary=${a.binarySha256Hex?.slice(0, 8) ?? '?'}…`,
+    };
+  }
+  return {
+    ...base,
+    state: 'verified',
+    detail: `SEV-SNP REPORT_DATA matches (binary=${a.binarySha256Hex?.slice(0, 8) ?? '?'}…)`,
+  };
+}
+
 export async function runOnionPirQuery(
   scriptHash: Uint8Array,
   scriptPubKeyHex: string,
+  options: PlaygroundQueryOptions = {},
 ): Promise<PlaygroundQueryResult> {
-  // OnionPIR only talks to one server. The fleet split puts the OnionPIR
-  // worker on pir1 (Hetzner). pir2 currently runs --serve-queries only and
-  // doesn't expose OnionPIR.
+  // OnionPIR only talks to one server: pir1 (Hetzner).
   const url = PIR1_URL;
+  const label = 'OnionPIR (pir1)';
   const t0 = performance.now();
-  const notes: string[] = [];
+  const notes: string[] = [
+    'OnionPIR is a single-server FHE backend. SEAL doesn’t compile to wasm32 (the BFV core math runs in a separate hand-rolled WASM module).',
+  ];
   await ensureOnionWasmFactory();
-  const client = new OnionPirWebClient({ serverUrl: url });
+
+  let attestationInfo: ServerAttestation | null = null;
+  let identity: OperatorIdentity = { state: 'not-checked' };
+  let creditsInfo: CreditEnablement | null = null;
+  const client = new OnionPirWebClient({
+    serverUrl: url,
+    expectedServerPin: PIR1_PIN,
+    expectedServerId: PIR1_PROVIDER.stableServerId,
+    pinnedOperatorPubkey: PIR1_PROVIDER.operatorPubkey,
+    onAttestation: (status) => {
+      attestationInfo = status;
+    },
+    onOperatorIdentity: (status) => {
+      identity = status;
+    },
+    creditProvider: options.creditProvider ?? NO_CREDITS,
+    onCredits: (status) => {
+      creditsInfo = status;
+    },
+  });
+  const facts = (): SessionFacts => ({
+    attestation: [summarizeAdapterAttestation(url, label, PIR1_PIN, attestationInfo)],
+    operatorIdentity: [{ label, identity }],
+    credits: creditsInfo
+      ? [{ label, state: (creditsInfo as CreditEnablement).state, error: (creditsInfo as CreditEnablement).error }]
+      : [],
+    notes,
+  });
   try {
     await client.connect();
 
-    // Hand-roll attestation against pir1's pin. The hand-rolled TS client
-    // doesn't expose attest(); we still surface a best-effort summary so
-    // the playground badge is consistent across backends.
-    const attestation: AttestationSummary[] = [
-      {
-        url,
-        label: 'OnionPIR (pir1)',
-        state: 'unsupported',
-        detail: 'OnionPIR runs on the Hetzner host (no SEV-SNP). Pin only covers binary_sha256.',
-        pin: PIR1_PIN,
-      },
-    ];
-
     const qStart = performance.now();
-    const results = await client.queryBatch([scriptHash], undefined, 0);
-    // queryBatch leaves merkleVerified undefined — drive the actual
-    // per-bin Merkle proof rounds through `verifyMerkleBatch`. The
-    // OnionPIR client also propagates the verdict back into each
-    // result, but we use the returned boolean[] directly so an empty
-    // tree branch (no leaves) doesn't silently look "verified".
-    const merkleVerified = await runMerkleBatch(
-      () => client.verifyMerkleBatch(results.filter((r): r is NonNullable<typeof r> => !!r)),
-      notes,
-    );
+    let results: (QueryResult | null)[];
+    let merkleVerified: boolean;
+    try {
+      results = await client.queryBatch([scriptHash], undefined, 0);
+      // queryBatch does not verify on its own — drive the per-bin Merkle
+      // proof rounds explicitly. An empty verdict list counts as untrusted
+      // (runMerkleBatch), never as "nothing to check".
+      merkleVerified = await runMerkleBatch(
+        () => client.verifyMerkleBatch(results.filter((r): r is QueryResult => !!r)),
+        notes,
+      );
+    } catch (e) {
+      const msg = errorMessage(e);
+      if (CREDITS_REFUSAL.test(msg)) {
+        return paymentRequiredResult('onionpir', scriptHash, scriptPubKeyHex, t0, facts(), 'merkle', msg);
+      }
+      throw e;
+    }
     const qElapsed = performance.now() - qStart;
-
     const out = translateLegacyResult(results[0]);
-
-    notes.push(
-      'OnionPIR is a single-server FHE backend. SEAL doesn’t compile to wasm32 (the BFV core math runs in a separate hand-rolled WASM module).',
-    );
 
     return {
       backend: 'onionpir',
-      operatorIdentity: [],
       scriptPubKeyHex,
       scriptHashHex: bytesToHex(scriptHash),
       totalElapsedMs: performance.now() - t0,
@@ -547,9 +750,9 @@ export async function runOnionPirQuery(
       utxos: out.utxos,
       totalSats: out.totalSats,
       isWhale: out.isWhale,
+      verification: 'merkle',
       merkleVerified,
-      attestation,
-      notes,
+      ...facts(),
     };
   } finally {
     try {
@@ -557,6 +760,98 @@ export async function runOnionPirQuery(
     } catch {}
   }
 }
+
+// ── Direct ORAM backend (the free path) ───────────────────────────────────
+
+/**
+ * The production Direct ORAM client configuration, shared by the structured
+ * "Run query" path and the snippet. Strict: attestation (AMD chain + pinned
+ * binary + MEASUREMENT), the operator-signed identity of pir2, and a
+ * database proof checked in the browser must all pass before any lookup, and
+ * every lookup is one fixed-budget request (`PRODUCTION_ORAM_BATCH_PLANNER`).
+ */
+export function oramProductionConfig(creditProvider: CreditProvider = NO_CREDITS) {
+  return {
+    serverUrl: PIR2_PROVIDER.endpoint,
+    strictVerification: true,
+    expectedArkFingerprint: AMD_TURIN_ARK_FINGERPRINT,
+    expectedServerPin: PIR2_PROVIDER.serverPin,
+    expectedServerId: PIR2_PROVIDER.stableServerId,
+    pinnedOperatorPubkey: PIR2_PROVIDER.operatorPubkey,
+    verifyOperatorIdentity: true,
+    databaseProofPins: PRODUCTION_ORAM_DB_PROOF_V2_PINS,
+    batchPlanner: PRODUCTION_ORAM_BATCH_PLANNER,
+    creditProvider,
+  };
+}
+
+export async function runOramQuery(
+  scriptHash: Uint8Array,
+  scriptPubKeyHex: string,
+  options: PlaygroundQueryOptions = {},
+): Promise<PlaygroundQueryResult> {
+  const url = PIR2_PROVIDER.endpoint;
+  const label = 'ORAM (pir2)';
+  const t0 = performance.now();
+  const notes: string[] = [
+    'Direct ORAM runs inside an AMD SEV-SNP guest: the server process sees the script hash, the host does not. Every lookup is one fixed-budget request (25 padded slots).',
+  ];
+  let creditsInfo: CreditEnablement | null = null;
+  const client = new OramPirClientAdapter({
+    ...oramProductionConfig(options.creditProvider ?? NO_CREDITS),
+    onCredits: (status) => {
+      creditsInfo = status;
+    },
+  });
+  const facts = (): SessionFacts => ({
+    attestation: [summarizeAdapterAttestation(url, label, PIR2_TIER3_PIN, client.attestation)],
+    operatorIdentity: [{ label, identity: client.operatorIdentity }],
+    credits: creditsInfo
+      ? [{ label, state: (creditsInfo as CreditEnablement).state, error: (creditsInfo as CreditEnablement).error }]
+      : [],
+    notes,
+  });
+  try {
+    await client.connect();
+    const dbProof = client.getDatabaseProofStatus(0);
+
+    const qStart = performance.now();
+    let results: (QueryResult | null)[];
+    try {
+      results = await client.queryBatch([scriptHash], undefined, 0);
+    } catch (e) {
+      const msg = errorMessage(e);
+      if (CREDITS_REFUSAL.test(msg)) {
+        return paymentRequiredResult('oram', scriptHash, scriptPubKeyHex, t0, facts(), 'attested-oram', msg);
+      }
+      throw e;
+    }
+    const qElapsed = performance.now() - qStart;
+    const out = translateLegacyResult(results[0]);
+
+    return {
+      backend: 'oram',
+      scriptPubKeyHex,
+      scriptHashHex: bytesToHex(scriptHash),
+      totalElapsedMs: performance.now() - t0,
+      queryElapsedMs: qElapsed,
+      utxos: out.utxos,
+      totalSats: out.totalSats,
+      isWhale: out.isWhale,
+      verification: 'attested-oram',
+      // Strict mode refuses to query without a verified database proof, so a
+      // returned result implies it; state it from the adapter anyway.
+      merkleVerified: dbProof?.state === 'verified',
+      ...facts(),
+    };
+  } finally {
+    try {
+      client.disconnect();
+    } catch {}
+  }
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────
 
 function translateLegacyResult(r: QueryResult | null | undefined): {
   utxos: PlaygroundUtxo[];
@@ -597,7 +892,7 @@ async function runMerkleBatch(
     }
     return verdicts.every(Boolean);
   } catch (e) {
-    notes.push(`Merkle verification errored — treating as untrusted: ${(e as Error)?.message ?? e}`);
+    notes.push(`Merkle verification errored — treating as untrusted: ${errorMessage(e)}`);
     return false;
   }
 }
@@ -620,9 +915,11 @@ export async function runQuery(
   backend: Backend,
   scriptHash: Uint8Array,
   scriptPubKeyHex: string,
+  options: PlaygroundQueryOptions = {},
 ): Promise<PlaygroundQueryResult> {
-  if (backend === 'dpf') return runDpfQuery(scriptHash, scriptPubKeyHex);
-  if (backend === 'harmonypir') return runHarmonyQuery(scriptHash, scriptPubKeyHex);
-  if (backend === 'onionpir') return runOnionPirQuery(scriptHash, scriptPubKeyHex);
+  if (backend === 'dpf') return runDpfQuery(scriptHash, scriptPubKeyHex, options);
+  if (backend === 'harmonypir') return runHarmonyQuery(scriptHash, scriptPubKeyHex, options);
+  if (backend === 'onionpir') return runOnionPirQuery(scriptHash, scriptPubKeyHex, options);
+  if (backend === 'oram') return runOramQuery(scriptHash, scriptPubKeyHex, options);
   throw new Error(`Unknown backend ${backend as string}`);
 }

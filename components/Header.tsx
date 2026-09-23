@@ -4,7 +4,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 const NAV = [
   { href: '/playground', label: 'Playground' },
   { href: '/explorer', label: 'Wire explorer' },
-  { href: '/rate-limiting', label: 'Rate limiting' },
+  { href: '/docs/sdk/payments', label: 'Payments' },
   { href: '/docs', label: 'Docs' },
 ];
 

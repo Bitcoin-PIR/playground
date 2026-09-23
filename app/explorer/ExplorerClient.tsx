@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BackendSelector, type Backend } from '@/components/BackendSelector';
+import { BackendSelector } from '@/components/BackendSelector';
 import { FrameTimeline } from '@/components/explorer/FrameTimeline';
 import { InvariantStatus } from '@/components/explorer/InvariantStatus';
 import { PaddingViz } from '@/components/explorer/PaddingViz';
@@ -13,7 +13,7 @@ import {
   type CapturedFrame,
 } from '@/lib/explorer/frame-tap';
 import { checkInvariants } from '@/lib/explorer/invariants';
-import { runQuery } from '@/lib/explorer/runner';
+import { runQuery, type Backend } from '@/lib/explorer/runner';
 import { loadWasm } from '@/lib/wasm-loader';
 
 /**
@@ -22,6 +22,9 @@ import { loadWasm } from '@/lib/wasm-loader';
  * served snapshot. Use as the default "found" demo input.
  */
 const DEFAULT_ADDRESS = '1D4HSHPJxoPLqiBNFNarz34dcWPLvpiaeb';
+
+/** The explorer inspects the three PIR backends; ORAM frames are sealed by design. */
+const EXPLORER_BACKENDS: readonly Backend[] = ['dpf', 'harmonypir', 'onionpir'];
 
 export function ExplorerClient() {
   const [backend, setBackend] = useState<Backend>('dpf');
@@ -69,10 +72,13 @@ export function ExplorerClient() {
     () =>
       checkInvariants(
         frames,
-        { harmonyDecodeCounts: harmonyDecodeCounts ?? undefined },
+        {
+          harmonyDecodeCounts: harmonyDecodeCounts ?? undefined,
+          runAborted: !running && error ? error : undefined,
+        },
         backend,
       ),
-    [frames, harmonyDecodeCounts, backend],
+    [frames, harmonyDecodeCounts, backend, running, error],
   );
 
   async function onRun() {
@@ -117,8 +123,20 @@ export function ExplorerClient() {
           1. Pick a backend &amp; run a query
         </h2>
         <div className="mt-3">
-          <BackendSelector value={backend} onChange={setBackend} />
+          <BackendSelector<Backend>
+            value={backend}
+            onChange={setBackend}
+            backends={EXPLORER_BACKENDS}
+          />
         </div>
+        <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          pir1 (DPF server0, the HarmonyPIR hint server, OnionPIR) requires credits for
+          every metered frame, and credits can only be presented inside the sealed channel.
+          The explorer keeps the wire in cleartext so the frames stay readable, so a run
+          stops at pir1&apos;s first metered frame (&ldquo;insufficient gas&rdquo;); the
+          frames captured up to that point are still shown and checked. Paid queries and
+          the free ORAM TEE backend run in the <a href="/playground" className="underline">playground</a>.
+        </p>
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <label className="block flex-1 min-w-[260px]">
             <div className="mb-1 text-xs text-zinc-500">

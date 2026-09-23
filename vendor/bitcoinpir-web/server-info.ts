@@ -5,7 +5,7 @@
  * All backends extract their parameters from the same JSON structure.
  */
 
-import { REQ_GET_INFO_JSON, REQ_RESIDENCY, REQ_GET_DB_CATALOG } from './constants.js';
+import { REQ_GET_INFO_JSON, REQ_GET_DB_CATALOG } from './constants.js';
 import type { ManagedWebSocket } from './ws.js';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -48,6 +48,9 @@ export interface ServerInfoJson {
   onionpir_merkle?: OnionPirMerkleInfoJson;
   /** Per-database info (Merkle availability). Present when server has >1 DB or any DB has bucket Merkle. */
   databases?: PerDatabaseInfoJson[];
+  /** Gas card and credits flags (docs/CREDITS.md), passed through raw for `credits.ts`. */
+  gas?: unknown;
+  credits?: { enabled: boolean; required: boolean };
 }
 
 export interface PerDatabaseInfoJson {
@@ -164,6 +167,10 @@ export function parseServerInfoJson(jsonStr: string): ServerInfoJson {
     chunk_slot_size: raw.chunk_slot_size,
     role: raw.role,
   };
+  if (raw.gas !== undefined) info.gas = raw.gas;
+  if (raw.credits && typeof raw.credits === 'object') {
+    info.credits = { enabled: raw.credits.enabled === true, required: raw.credits.required === true };
+  }
 
   // `onionpir` is defined below but we also want it in the top-level
   // `info.onionpir` assignment. The helper is hoisted via `const` below so
@@ -279,47 +286,6 @@ export async function fetchServerInfoJson(
   return parseServerInfoJson(jsonStr);
 }
 
-// ─── Residency ──────────────────────────────────────────────────────────────
-
-export interface ResidencyRegion {
-  name: string;
-  size: number;
-  resident: number;
-  pct: number;
-}
-
-export interface ResidencyInfo {
-  page_size: number;
-  regions: ResidencyRegion[];
-  total_size: number;
-  total_resident: number;
-  total_pct: number;
-}
-
-/** Pre-built request: [4B len=1 LE][1B variant=REQ_RESIDENCY] */
-const RESIDENCY_REQUEST = new Uint8Array([1, 0, 0, 0, REQ_RESIDENCY]);
-
-/**
- * Fetch mmap page residency from a connected server.
- *
- * Wire format:
- *   Request:  [4B len=1 LE][1B 0x04]
- *   Response: [4B len LE][1B 0x04][JSON bytes...]
- */
-export async function fetchResidency(ws: ManagedWebSocket): Promise<ResidencyInfo> {
-  const raw = await ws.sendRaw(RESIDENCY_REQUEST);
-  if (raw.length < 6) {
-    throw new Error('Residency response too short');
-  }
-  const variant = raw[4];
-  if (variant === 0xFF) {
-    throw new Error('Server returned error for residency request');
-  }
-  const jsonBytes = raw.slice(5);
-  const jsonStr = new TextDecoder().decode(jsonBytes);
-  return JSON.parse(jsonStr) as ResidencyInfo;
-}
-
 // ─── Database Catalog ──────────────────────────────────────────────────────
 
 export interface DatabaseCatalogEntry {
@@ -354,6 +320,72 @@ export interface DatabaseCatalogEntry {
 
 export interface DatabaseCatalog {
   databases: DatabaseCatalogEntry[];
+}
+
+/**
+ * Translate the catalog returned by `WasmDatabaseCatalog.toJson()` into the
+ * web client's canonical catalog shape. In strict mode this post-upgrade
+ * catalog is the only input to sync planning; the separate server-info socket
+ * remains diagnostic and cannot add, remove, or rewrite sync steps.
+ */
+export function databaseCatalogFromWasmJson(raw: any): DatabaseCatalog {
+  if (!raw || !Array.isArray(raw.databases)) {
+    throw new Error('WASM database catalog is missing databases');
+  }
+
+  const asBigInt = (value: unknown, field: string): bigint => {
+    try {
+      return BigInt(value as string | number | bigint);
+    } catch {
+      throw new Error(`WASM database catalog has invalid ${field}`);
+    }
+  };
+  const asNumber = (value: unknown, field: string): number => {
+    const result = Number(value);
+    if (!Number.isInteger(result) || result < 0) {
+      throw new Error(`WASM database catalog has invalid ${field}`);
+    }
+    return result;
+  };
+
+  return {
+    databases: raw.databases.map((db: any, index: number): DatabaseCatalogEntry => {
+      if (!db || typeof db !== 'object') {
+        throw new Error(`WASM database catalog entry ${index} is invalid`);
+      }
+      return {
+        dbId: asNumber(db.dbId, `databases[${index}].dbId`),
+        dbType: asNumber(db.dbType, `databases[${index}].dbType`),
+        name: typeof db.name === 'string' ? db.name : '',
+        baseHeight: asNumber(db.baseHeight, `databases[${index}].baseHeight`),
+        height: asNumber(db.height, `databases[${index}].height`),
+        indexBinsPerTable: asNumber(
+          db.indexBins ?? db.indexBinsPerTable,
+          `databases[${index}].indexBins`,
+        ),
+        chunkBinsPerTable: asNumber(
+          db.chunkBins ?? db.chunkBinsPerTable,
+          `databases[${index}].chunkBins`,
+        ),
+        indexK: asNumber(db.indexK, `databases[${index}].indexK`),
+        chunkK: asNumber(db.chunkK, `databases[${index}].chunkK`),
+        tagSeed: asBigInt(db.tagSeed, `databases[${index}].tagSeed`),
+        dpfNIndex: asNumber(db.dpfNIndex, `databases[${index}].dpfNIndex`),
+        dpfNChunk: asNumber(db.dpfNChunk, `databases[${index}].dpfNChunk`),
+        hasBucketMerkle: db.hasBucketMerkle === true,
+        indexMasterSeed: asBigInt(
+          db.indexMasterSeed ?? 0,
+          `databases[${index}].indexMasterSeed`,
+        ),
+        chunkMasterSeed: asBigInt(
+          db.chunkMasterSeed ?? 0,
+          `databases[${index}].chunkMasterSeed`,
+        ),
+        anchorKind: asNumber(db.anchorKind ?? 0, `databases[${index}].anchorKind`),
+        anchorHex: typeof db.anchorHex === 'string' ? db.anchorHex : '',
+      };
+    }),
+  };
 }
 
 /** Pre-built request: [4B len=1 LE][1B variant=REQ_GET_DB_CATALOG] */

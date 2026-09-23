@@ -40,6 +40,7 @@ export const DOCS_NAV: DocSection[] = [
     links: [
       { slug: 'sdk/typescript', title: 'TypeScript / WASM', summary: 'The browser SDK — DPF and HarmonyPIR via WASM, OnionPIR via hand-rolled TS.' },
       { slug: 'sdk/rust', title: 'Rust', summary: 'Native crates: pir-sdk-client, pir-sdk, pir-core. Same protocol, no WASM.' },
+      { slug: 'sdk/payments', title: 'Payments (credits)', summary: 'Who charges, the price, and the credit provider every client takes.' },
     ],
   },
   {

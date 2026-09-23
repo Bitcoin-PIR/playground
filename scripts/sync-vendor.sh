@@ -16,12 +16,12 @@ fi
 PLAYGROUND=$(cd "$(dirname "$0")/.." && pwd)
 echo "syncing from $REPO -> $PLAYGROUND/vendor/"
 
-# --- WASM (pir-sdk-wasm/pkg) -----------------------------------------------
-WASM_SRC="$REPO/pir-sdk-wasm/pkg"
+# --- WASM (crates/sdk/wasm/pkg) --------------------------------------------
+WASM_SRC="$REPO/crates/sdk/wasm/pkg"
 WASM_DST="$PLAYGROUND/vendor/pir-sdk-wasm"
 if [ ! -d "$WASM_SRC" ]; then
   echo "error: $WASM_SRC not found. Build it first:" >&2
-  echo "  cd $REPO/pir-sdk-wasm && wasm-pack build --target web --out-dir pkg" >&2
+  echo "  cd $REPO/crates/sdk/wasm && wasm-pack build --target web --out-dir pkg" >&2
   exit 1
 fi
 rm -rf "$WASM_DST"
@@ -44,21 +44,10 @@ rm -rf "$WEB_DST"
 mkdir -p "$WEB_DST"
 # Files needed for OnionPIR + DPF/Harmony adapters + shared utilities.
 # Derived from the import graph; see CONTRIBUTING.md for the full set.
-for f in \
-  onionpir_client.ts onion-unpack.ts \
-  dpf-adapter.ts harmonypir-adapter.ts \
-  sdk-bridge.ts sync-controller.ts sync.ts sync-merge.ts \
-  codec.ts hash.ts merkle.ts pbc.ts scan.ts ws.ts \
-  server-info.ts protocol.ts leakage.ts attest-pin.ts \
-  types.ts harmony-types.ts harmonypir_hint_db.ts \
-  constants.ts polyfills.ts \
-  payment-client.ts cashu-bat.ts credential-manager.ts arc-present.ts; do
-  if [ -f "$WEB_SRC/$f" ]; then
-    cp "$WEB_SRC/$f" "$WEB_DST/$f"
-  else
-    echo "warn: $WEB_SRC/$f missing — skipping" >&2
-  fi
-done
+# Every non-test module of the browser client library. Copying the whole
+# directory (instead of a hand-kept list) keeps the vendor in step as the
+# library grows (credits, ORAM, proof verification, ...).
+find "$WEB_SRC" -maxdepth 1 -type f -name '*.ts' ! -name '*.test.ts' -exec cp {} "$WEB_DST/" \;
 
 # --- Record the source commit ---------------------------------------------
 if (cd "$REPO" && git rev-parse HEAD > /dev/null 2>&1); then

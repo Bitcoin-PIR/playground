@@ -143,6 +143,13 @@ export interface InvariantContext {
    * checks instead of staying `n/a`.
    */
   harmonyDecodeCounts?: (frame: Uint8Array) => Uint32Array;
+  /**
+   * Set when the run ended early with this error (for example a server that
+   * requires credits refused a metered frame). Sequence checks that need
+   * the complete round order report `n/a` for the missing tail instead of a
+   * violation: the client stopped, it did not skip a round.
+   */
+  runAborted?: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -298,11 +305,13 @@ export function checkInvariants(
         );
         if (followers.length === 0) missing++;
       }
-      state = missing === 0 ? 'pass' : 'fail';
+      state = missing === 0 ? 'pass' : ctx.runAborted ? 'n/a' : 'fail';
       summary =
         missing === 0
           ? `Every one of ${indexBatchTx.length} INDEX_BATCH frame(s) was followed by ≥1 CHUNK_BATCH on its socket`
-          : `${missing}/${indexBatchTx.length} INDEX_BATCH frame(s) NOT followed by CHUNK_BATCH — privacy violation`;
+          : ctx.runAborted
+            ? `The run stopped before its CHUNK round (${ctx.runAborted}) — ${missing}/${indexBatchTx.length} INDEX_BATCH frame(s) without a CHUNK_BATCH is expected for an aborted run, not a skipped round`
+            : `${missing}/${indexBatchTx.length} INDEX_BATCH frame(s) NOT followed by CHUNK_BATCH — privacy violation`;
       detail.push({
         label: 'INDEX_BATCH frames',
         value: `${indexBatchTx.length}`,
@@ -343,11 +352,13 @@ export function checkInvariants(
         );
         if (followers.length === 0) missing++;
       }
-      state = missing === 0 ? 'pass' : 'fail';
+      state = missing === 0 ? 'pass' : ctx.runAborted ? 'n/a' : 'fail';
       summary =
         missing === 0
           ? `Every one of ${onionIndexQueryTx.length} ONION_INDEX_QUERY frame(s) was followed by ≥1 ONION_CHUNK_QUERY`
-          : `${missing}/${onionIndexQueryTx.length} ONION_INDEX_QUERY NOT followed by ONION_CHUNK_QUERY — privacy violation`;
+          : ctx.runAborted
+            ? `The run stopped before its CHUNK round (${ctx.runAborted}) — ${missing}/${onionIndexQueryTx.length} ONION_INDEX_QUERY without an ONION_CHUNK_QUERY is expected for an aborted run, not a skipped round`
+            : `${missing}/${onionIndexQueryTx.length} ONION_INDEX_QUERY NOT followed by ONION_CHUNK_QUERY — privacy violation`;
       detail.push({
         label: 'ONION_INDEX_QUERY frames',
         value: `${onionIndexQueryTx.length}`,

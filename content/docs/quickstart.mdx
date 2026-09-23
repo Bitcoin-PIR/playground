@@ -7,6 +7,15 @@ SDK](/docs/sdk/typescript). The same flow works in any browser
 wallet, in a desktop wallet that ships a Node runtime, or in any
 JS environment with a `WebSocket`.
 
+<Callout kind="warn" title="pir1 requires credits">
+Since 2026-09-15 the hint / DPF server 0 (`pir1`) charges
+[credits](/docs/sdk/payments) for every metered frame. Without a credit
+provider the query below stops at pir1's first metered frame with
+`credits required`. Add one after the sealed channel (step 5), or start
+with the free Direct ORAM backend — the [Payments](/docs/sdk/payments) page
+has both.
+</Callout>
+
 By the end you'll have:
 
 1. The WASM SDK loaded in your app.
@@ -21,7 +30,7 @@ npm install pir-sdk-wasm
 ```
 
 The package is the wasm-pack output of the
-[`pir-sdk-wasm`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/pir-sdk-wasm)
+[`pir-sdk-wasm`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/tree/main/crates/sdk/wasm)
 crate. It ships a small JS loader, a `.wasm` binary, and the
 TypeScript `.d.ts`. Bundle works with Webpack, Vite, esbuild, Next.js,
 and any other tool that understands ES modules.
@@ -29,8 +38,8 @@ and any other tool that understands ES modules.
 <Callout kind="note" title="Not on npm yet?">
 While the package is finalizing distribution, you can build it
 locally from the main repo with `wasm-pack build --target web --out-dir pkg`
-inside `pir-sdk-wasm/`, and `npm link` it. See
-[`pir-sdk-wasm/README.md`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/pir-sdk-wasm/README.md)
+inside `crates/sdk/wasm/`, and `npm link` it. See
+[`crates/sdk/wasm/README.md`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/crates/sdk/wasm/README.md)
 for the canonical build path.
 </Callout>
 
