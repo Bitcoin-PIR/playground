@@ -717,15 +717,6 @@ export class WasmDpfClient {
      */
     presentCredits(server_index: number, kind: number, payload: Uint8Array): Promise<any>;
     /**
-     * Attach a cashier-signed session grant (133 bytes) to one connected
-     * server (`serverIndex` ∈ {0, 1}) and return the credits remaining on
-     * that server. Call after [`Self::upgrade_to_secure_channel`] so the
-     * bearer grant rides the encrypted channel. Rejects with the server's
-     * RESP_ERROR text when grants are not enabled there, the issuer is not
-     * pinned, or the grant is expired or exhausted.
-     */
-    presentSessionGrant(server_index: number, grant: Uint8Array): Promise<number>;
-    /**
      * Low-level: query a single database by `db_id` without the
      * catalog/plan orchestration. Matches
      * `PirClient::query_batch`.
@@ -1058,12 +1049,6 @@ export class WasmHarmonyClient {
      */
     presentCredits(server_index: number, kind: number, payload: Uint8Array): Promise<any>;
     /**
-     * Attach a cashier-signed session grant to the hint (`serverIndex=0`)
-     * or query (`serverIndex=1`) server. See
-     * [`WasmDpfClient::present_session_grant`].
-     */
-    presentSessionGrant(server_index: number, grant: Uint8Array): Promise<number>;
-    /**
      * Low-level: query a single database by `db_id`. See
      * [`WasmDpfClient::query_batch`].
      */
@@ -1240,12 +1225,6 @@ export class WasmOramClient {
      * `{ gasAdded, gasBalance }`. See [`WasmDpfClient::present_credits`].
      */
     presentCredits(kind: number, payload: Uint8Array): Promise<any>;
-    /**
-     * Attach a cashier-signed session grant to the connection and return
-     * the credits remaining on this server. See
-     * [`WasmDpfClient::present_session_grant`].
-     */
-    presentSessionGrant(grant: Uint8Array): Promise<number>;
     /**
      * Low-level ORAM batch query against one database.
      *
@@ -2001,7 +1980,6 @@ export interface InitOutput {
     readonly wasmdpfclient_onStateChange: (a: number, b: any) => void;
     readonly wasmdpfclient_preflightDatabase: (a: number, b: number) => any;
     readonly wasmdpfclient_presentCredits: (a: number, b: number, c: number, d: number, e: number) => any;
-    readonly wasmdpfclient_presentSessionGrant: (a: number, b: number, c: number, d: number) => any;
     readonly wasmdpfclient_queryBatch: (a: number, b: any, c: number) => any;
     readonly wasmdpfclient_queryBatchVerified: (a: number, b: any, c: number) => any;
     readonly wasmdpfclient_serverUrls: (a: number) => any;
@@ -2042,7 +2020,6 @@ export interface InitOutput {
     readonly wasmharmonyclient_onStateChange: (a: number, b: any) => void;
     readonly wasmharmonyclient_preflightDatabase: (a: number, b: number) => any;
     readonly wasmharmonyclient_presentCredits: (a: number, b: number, c: number, d: number, e: number) => any;
-    readonly wasmharmonyclient_presentSessionGrant: (a: number, b: number, c: number, d: number) => any;
     readonly wasmharmonyclient_queryBatch: (a: number, b: any, c: number) => any;
     readonly wasmharmonyclient_queryBatchVerified: (a: number, b: any, c: number) => any;
     readonly wasmharmonyclient_saveHints: (a: number) => [number, number, number];
@@ -2070,7 +2047,6 @@ export interface InitOutput {
     readonly wasmoramclient_isConnected: (a: number) => number;
     readonly wasmoramclient_new: (a: number, b: number) => number;
     readonly wasmoramclient_presentCredits: (a: number, b: number, c: number, d: number) => any;
-    readonly wasmoramclient_presentSessionGrant: (a: number, b: number, c: number) => any;
     readonly wasmoramclient_queryBatch: (a: number, b: any, c: number) => any;
     readonly wasmoramclient_queryBatchPadded: (a: number, b: any, c: number, d: number) => any;
     readonly wasmoramclient_serverUrl: (a: number) => [number, number];
