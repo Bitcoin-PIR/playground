@@ -13,21 +13,39 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
     <div className="space-y-5">
       {result.paymentRequired && (
         <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          <div className="font-semibold">Payment required</div>
-          <p className="mt-1">
-            A server this backend uses charges credits, and the playground has no wallet yet,
-            so the lookup stopped at the first metered frame. Attestation and identity below
-            are real; no UTXOs were fetched.
-          </p>
-          <p className="mt-1">
-            About {result.paymentRequired.approxCredits} credit
-            {result.paymentRequired.approxCredits === 1 ? '' : 's'} (≈{' '}
-            {result.paymentRequired.approxCredits * CREDIT_SAT} sat) per single-address lookup
-            when every server of this backend charges. The ORAM TEE backend is free today.{' '}
-            <Link href="/docs/sdk/payments" className="underline">
-              How payments work
-            </Link>
-          </p>
+          {/^free capacity busy/i.test(result.paymentRequired.message) ? (
+            <>
+              <div className="font-semibold">Server busy</div>
+              <p className="mt-1">
+                This backend is free while the server has room, and right now it has none: paid
+                lookups go first and the free lane is full. Retry in a moment; a wallet with
+                credits would have paid for priority instead. Attestation and identity below are
+                real; no UTXOs were fetched.{' '}
+                <Link href="/docs/sdk/payments" className="underline">
+                  How payments work
+                </Link>
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="font-semibold">Payment required</div>
+              <p className="mt-1">
+                A server this backend uses charges credits, and the playground has no wallet yet,
+                so the lookup stopped at the first metered frame. Attestation and identity below
+                are real; no UTXOs were fetched.
+              </p>
+              <p className="mt-1">
+                About {result.paymentRequired.approxCredits} credit
+                {result.paymentRequired.approxCredits === 1 ? '' : 's'} (≈{' '}
+                {result.paymentRequired.approxCredits * CREDIT_SAT} sat) per single-address lookup
+                when every server of this backend charges. DPF-PIR and ORAM TEE are free while the
+                servers have room.{' '}
+                <Link href="/docs/sdk/payments" className="underline">
+                  How payments work
+                </Link>
+              </p>
+            </>
+          )}
           <p className="mt-2 font-mono text-xs opacity-80">{result.paymentRequired.message}</p>
         </div>
       )}
@@ -78,11 +96,13 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
                 {c.label}:{' '}
                 {c.state === 'required'
                   ? 'required — metered frames are paid from the wallet'
-                  : c.state === 'not-required'
-                    ? 'accepted, not charged'
-                    : c.state === 'not-enabled'
-                      ? 'free (credits not enabled)'
-                      : `error — ${c.error ?? 'unknown'}`}
+                  : c.state === 'best-effort'
+                    ? 'free while the server has room — paid from the wallet only when it is busy'
+                    : c.state === 'not-required'
+                      ? 'accepted, not charged'
+                      : c.state === 'not-enabled'
+                        ? 'free (credits not enabled)'
+                        : `error — ${c.error ?? 'unknown'}`}
               </li>
             ))}
           </ul>

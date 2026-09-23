@@ -7,13 +7,12 @@ SDK](/docs/sdk/typescript). The same flow works in any browser
 wallet, in a desktop wallet that ships a Node runtime, or in any
 JS environment with a `WebSocket`.
 
-<Callout kind="warn" title="pir1 requires credits">
-Since 2026-09-15 the hint / DPF server 0 (`pir1`) charges
-[credits](/docs/sdk/payments) for every metered frame. Without a credit
-provider the query below stops at pir1's first metered frame with
-`credits required`. Add one after the sealed channel (step 5), or start
-with the free Direct ORAM backend — the [Payments](/docs/sdk/payments) page
-has both.
+<Callout kind="note" title="Free while the servers have room">
+The reference servers serve DPF free on a best-effort lane: paid lookups
+go first, and when the free lane is full a server answers
+`free capacity busy` instead. A [credit provider](/docs/sdk/payments)
+added after the sealed channel (step 5) pays for priority then;
+HarmonyPIR hints and OnionPIR on `pir1` always need one.
 </Callout>
 
 By the end you'll have:

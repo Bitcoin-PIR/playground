@@ -115,6 +115,22 @@ try {
 }
 ```
 
+## Payment errors
+
+### `credits required: this frame needs N more credit(s) and the wallet has none`
+
+The server charges for this backend (HarmonyPIR hints and OnionPIR on
+`pir1`) and the credit provider returned nothing. Buy credits and pass the
+wallet's `present` as the provider — see [Payments](/docs/sdk/payments).
+
+### `free capacity busy: …`
+
+The server serves this backend free while it has room (best-effort) and
+its free lane is full: paid lookups go first. Retry in a moment, or give
+the client a credit provider — with credits it pays for the refused frame
+and sends it again instead of returning this. The answer depends only on
+the server's load, never on the address looked up.
+
 ## Attestation errors
 
 ### `sevStatus: noSevHost`

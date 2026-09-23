@@ -85,9 +85,10 @@ export interface OperatorIdentitySummary {
 }
 
 /**
- * Credits (paid queries) on one server: `required` means its metered frames
- * are paid from the credit provider, `not-enabled` / `not-required` mean the
- * server is free today.
+ * Credits (paid queries) on one server, for this backend: `required` means
+ * its metered frames are paid from the credit provider, `best-effort` that
+ * they are free while the server has room (paid only when it is busy and the
+ * provider has credits), `not-enabled` / `not-required` that it is free.
  */
 export interface CreditsSummary {
   label: string;
@@ -96,9 +97,10 @@ export interface CreditsSummary {
 }
 
 /**
- * A server that requires credits refused the query because the credit
- * provider had none. The rest of the result (attestation, identity, credits
- * states) is still real; there are no UTXOs.
+ * A server refused the query: it requires credits and the credit provider
+ * had none, or its free lane was busy (`free capacity busy: …`). The rest
+ * of the result (attestation, identity, credits states) is still real;
+ * there are no UTXOs.
  */
 export interface PaymentRequired {
   /** Server-side message, verbatim. */
@@ -157,7 +159,7 @@ export interface PlaygroundQueryResult {
   operatorIdentity: OperatorIdentitySummary[];
   /** Per-server credits state, in connection order. */
   credits: CreditsSummary[];
-  /** Set when a server that requires credits refused the query. */
+  /** Set when a server refused the query: no credits, or its free lane was busy. */
   paymentRequired?: PaymentRequired;
   /** Backend-specific notes (e.g. "Hint server attestation skipped — Hetzner has no SEV"). */
   notes: string[];
@@ -174,7 +176,7 @@ export interface PlaygroundQueryOptions {
 /** The playground's wallet today: empty. */
 const NO_CREDITS: CreditProvider = () => null;
 
-const CREDITS_REFUSAL = /credits required|insufficient gas|REQ_CREDIT_PRESENT/i;
+const CREDITS_REFUSAL = /credits required|insufficient gas|REQ_CREDIT_PRESENT|free capacity busy/i;
 
 function errorMessage(e: unknown): string {
   return (e as Error)?.message ?? String(e);
