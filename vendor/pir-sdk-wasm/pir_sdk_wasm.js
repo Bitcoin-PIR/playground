@@ -1594,23 +1594,6 @@ export class WasmDpfClient {
         return ret;
     }
     /**
-     * Attach a cashier-signed session grant (133 bytes) to one connected
-     * server (`serverIndex` ∈ {0, 1}) and return the credits remaining on
-     * that server. Call after [`Self::upgrade_to_secure_channel`] so the
-     * bearer grant rides the encrypted channel. Rejects with the server's
-     * RESP_ERROR text when grants are not enabled there, the issuer is not
-     * pinned, or the grant is expired or exhausted.
-     * @param {number} server_index
-     * @param {Uint8Array} grant
-     * @returns {Promise<number>}
-     */
-    presentSessionGrant(server_index, grant) {
-        const ptr0 = passArray8ToWasm0(grant, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmdpfclient_presentSessionGrant(this.__wbg_ptr, server_index, ptr0, len0);
-        return ret;
-    }
-    /**
      * Low-level: query a single database by `db_id` without the
      * catalog/plan orchestration. Matches
      * `PirClient::query_batch`.
@@ -2223,20 +2206,6 @@ export class WasmHarmonyClient {
         return ret;
     }
     /**
-     * Attach a cashier-signed session grant to the hint (`serverIndex=0`)
-     * or query (`serverIndex=1`) server. See
-     * [`WasmDpfClient::present_session_grant`].
-     * @param {number} server_index
-     * @param {Uint8Array} grant
-     * @returns {Promise<number>}
-     */
-    presentSessionGrant(server_index, grant) {
-        const ptr0 = passArray8ToWasm0(grant, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmharmonyclient_presentSessionGrant(this.__wbg_ptr, server_index, ptr0, len0);
-        return ret;
-    }
-    /**
      * Low-level: query a single database by `db_id`. See
      * [`WasmDpfClient::query_batch`].
      * @param {Uint8Array} script_hashes
@@ -2597,19 +2566,6 @@ export class WasmOramClient {
         const ptr0 = passArray8ToWasm0(payload, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.wasmoramclient_presentCredits(this.__wbg_ptr, kind, ptr0, len0);
-        return ret;
-    }
-    /**
-     * Attach a cashier-signed session grant to the connection and return
-     * the credits remaining on this server. See
-     * [`WasmDpfClient::present_session_grant`].
-     * @param {Uint8Array} grant
-     * @returns {Promise<number>}
-     */
-    presentSessionGrant(grant) {
-        const ptr0 = passArray8ToWasm0(grant, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmoramclient_presentSessionGrant(this.__wbg_ptr, ptr0, len0);
         return ret;
     }
     /**
@@ -4326,27 +4282,27 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 482, function: Function { arguments: [Externref], shim_idx: 483, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 467, function: Function { arguments: [Externref], shim_idx: 468, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h490263039c0c107c, wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 657, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 641, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 642, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [NamedExternref("Event")], shim_idx: 657, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 641, function: Function { arguments: [NamedExternref("Event")], shim_idx: 642, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_2);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 657, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 641, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 642, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_3);
             return ret;
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [], shim_idx: 659, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 641, function: Function { arguments: [], shim_idx: 644, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__hc39032372d75848d);
             return ret;
         },

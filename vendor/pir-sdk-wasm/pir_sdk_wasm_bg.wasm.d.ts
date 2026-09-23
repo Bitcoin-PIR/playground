@@ -138,7 +138,6 @@ export const wasmdpfclient_new: (a: number, b: number, c: number, d: number) => 
 export const wasmdpfclient_onStateChange: (a: number, b: any) => void;
 export const wasmdpfclient_preflightDatabase: (a: number, b: number) => any;
 export const wasmdpfclient_presentCredits: (a: number, b: number, c: number, d: number, e: number) => any;
-export const wasmdpfclient_presentSessionGrant: (a: number, b: number, c: number, d: number) => any;
 export const wasmdpfclient_queryBatch: (a: number, b: any, c: number) => any;
 export const wasmdpfclient_queryBatchVerified: (a: number, b: any, c: number) => any;
 export const wasmdpfclient_serverUrls: (a: number) => any;
@@ -179,7 +178,6 @@ export const wasmharmonyclient_new: (a: number, b: number, c: number, d: number)
 export const wasmharmonyclient_onStateChange: (a: number, b: any) => void;
 export const wasmharmonyclient_preflightDatabase: (a: number, b: number) => any;
 export const wasmharmonyclient_presentCredits: (a: number, b: number, c: number, d: number, e: number) => any;
-export const wasmharmonyclient_presentSessionGrant: (a: number, b: number, c: number, d: number) => any;
 export const wasmharmonyclient_queryBatch: (a: number, b: any, c: number) => any;
 export const wasmharmonyclient_queryBatchVerified: (a: number, b: any, c: number) => any;
 export const wasmharmonyclient_saveHints: (a: number) => [number, number, number];
@@ -207,7 +205,6 @@ export const wasmoramclient_installVerifiedDatabaseProof: (a: number, b: number)
 export const wasmoramclient_isConnected: (a: number) => number;
 export const wasmoramclient_new: (a: number, b: number) => number;
 export const wasmoramclient_presentCredits: (a: number, b: number, c: number, d: number) => any;
-export const wasmoramclient_presentSessionGrant: (a: number, b: number, c: number) => any;
 export const wasmoramclient_queryBatch: (a: number, b: any, c: number) => any;
 export const wasmoramclient_queryBatchPadded: (a: number, b: any, c: number, d: number) => any;
 export const wasmoramclient_serverUrl: (a: number) => [number, number];
