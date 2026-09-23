@@ -8,8 +8,9 @@
  * imports to the same live SDK the structured path uses).
  *
  * Payments: each snippet wires a credit provider (docs: /docs/sdk/payments).
- * The one shown is an empty wallet, so a server that requires credits (pir1
- * today) stops the query with "credits required"; Direct ORAM is free today.
+ * The one shown is an empty wallet: DPF and Direct ORAM run free while the
+ * servers have room, and a backend a server charges for (HarmonyPIR hints
+ * and OnionPIR on pir1) stops the query with "credits required".
  */
 
 import type { Backend } from '@/components/BackendSelector';
@@ -28,14 +29,16 @@ export function buildSnippet(backend: Backend, address: string): string {
   }
 }
 
-const EMPTY_WALLET = `// Payments (/docs/sdk/payments): a credit provider funds metered frames on
-// servers that require credits. This one is an empty wallet; pass
+const EMPTY_WALLET = `// Payments (/docs/sdk/payments): each server says per backend whether it
+// charges; a credit provider funds the frames that are paid, and buys
+// priority when a free lane is busy. This one is an empty wallet; pass
 // CreditWallet.present from 'bitcoin-pir-web' to pay.
 const creditProvider = (credits: number) => null;`;
 
-const DPF_SNIPPET = `// DPF-PIR — two servers, low-latency, batch scans.
-// pir1 (server 0) charges credits: with the empty wallet below this
-// stops at pir1's first metered frame ("credits required").
+const DPF_SNIPPET = `// DPF-PIR — two servers, low-latency, batch scans. Free while the
+// servers have room: pir1 serves DPF on a best-effort free lane (paid
+// lookups go first; with the empty wallet below, a busy pir1 answers
+// "free capacity busy").
 
 import init, { WasmDpfClient } from 'pir-sdk-wasm';
 import { addressToScriptPubKey, scriptHash, hexToBytes }
@@ -71,6 +74,7 @@ try {
   await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);
 
   // After the sealed channel (presentations are bearer material).
+  // 'best-effort' = free while the server has room.
   console.log('credits pir1:', await client.enableCredits(0, creditProvider));
   console.log('credits pir2:', await client.enableCredits(1, creditProvider));
 
@@ -212,7 +216,8 @@ try {
 
 const ORAM_SNIPPET = `// Direct ORAM — one server inside an AMD SEV-SNP guest (pir2). The
 // server process sees the script hash, the host does not; every lookup
-// is one fixed-budget ORAM request (25 padded slots). Free today.
+// is one fixed-budget ORAM request (25 padded slots). Free while pir2
+// has room.
 
 import {
   OramPirClientAdapter,

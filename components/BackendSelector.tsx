@@ -3,10 +3,10 @@
 export type Backend = 'dpf' | 'harmonypir' | 'onionpir' | 'oram';
 
 export const BACKENDS: { id: Backend; label: string; tagline: string }[] = [
-  { id: 'dpf', label: 'DPF-PIR', tagline: 'two-server, low-latency, batch scans' },
+  { id: 'dpf', label: 'DPF-PIR', tagline: 'two-server, low-latency, batch scans · free when idle' },
   { id: 'harmonypir', label: 'HarmonyPIR', tagline: 'two-server, offline-phase, big batches' },
   { id: 'onionpir', label: 'OnionPIR', tagline: 'one-server FHE, single lookups' },
-  { id: 'oram', label: 'ORAM TEE', tagline: 'one-server AMD SEV-SNP enclave · free today' },
+  { id: 'oram', label: 'ORAM TEE', tagline: 'one-server AMD SEV-SNP enclave · free when idle' },
 ];
 
 export function BackendSelector<B extends Backend = Backend>({

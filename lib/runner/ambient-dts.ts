@@ -42,7 +42,7 @@ declare module 'pir-sdk-wasm' {
     connect(): Promise<void>;
     attest(serverIndex: number): Promise<WasmAttestVerification>;
     upgradeToSecureChannel(pub0: Uint8Array, pub1: Uint8Array): Promise<void>;
-    /** After the sealed channel: 'not-enabled' | 'not-required' | 'required'. */
+    /** After the sealed channel: 'not-enabled' | 'not-required' | 'required' | 'best-effort'. */
     enableCredits(serverIndex: number, provider: CreditProvider): Promise<string>;
     fetchCatalog(): Promise<any>;
     /** Query + per-bucket Merkle verification, all or nothing. */
@@ -95,7 +95,7 @@ declare module 'bitcoin-pir-web' {
   /** The production Direct ORAM request shape (25 padded slots). */
   export const PRODUCTION_ORAM_BATCH_PLANNER: Readonly<Record<string, number>>;
   export const PRODUCTION_CASHIER_URL: string;
-  export interface CreditEnablement { state: 'not-enabled' | 'not-required' | 'required' | 'error'; error?: string; }
+  export interface CreditEnablement { state: 'not-enabled' | 'not-required' | 'required' | 'best-effort' | 'error'; error?: string; }
   export class OramPirClientAdapter {
     constructor(config: {
       serverUrl: string;

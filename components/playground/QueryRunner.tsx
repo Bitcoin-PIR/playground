@@ -10,7 +10,8 @@ import { parseAddress } from '@/lib/address';
 import { runQuery, type PlaygroundQueryResult } from '@/lib/playground-clients';
 
 export function QueryRunner() {
-  // ORAM TEE is the free backend today (pir1 charges credits; see /docs/sdk/payments).
+  // DPF-PIR and ORAM TEE are free while the servers have room; HarmonyPIR and
+  // OnionPIR need credits on pir1 (see /docs/sdk/payments).
   const [backend, setBackend] = useState<Backend>('oram');
   const [address, setAddress] = useState('');
   const [running, setRunning] = useState(false);

@@ -1,28 +1,39 @@
 # Payments (credits)
 
-Lookups on the reference deployment are paid in **credits**. A wallet
-buys a credential once over Lightning and then spends it one frame at a
-time; the servers never learn who bought it, and nothing links a lookup to
+Lookups a server charges for are paid in **credits**. A wallet buys a
+credential once over Lightning and then spends it one frame at a time; the servers never learn who bought it, and nothing links a lookup to
 a purchase. The design and the rate card live in
 [`docs/CREDITS.md`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/docs/CREDITS.md)
 in the main repo; this page is the wallet-side view.
 
-## Who charges today
+## Who charges
 
-| Server | Serves | Credits |
+Every server decides, per backend, whether its lookups are **free**,
+**paid**, or **best-effort** — free while the server has room, with paid
+lookups served first — and publishes that in its `GET_INFO_JSON` answer
+(`"credits": { "access": { "dpf": { "mode": "best-effort", … }, … } }`).
+The SDK reads each server's own policy, so one wallet works against free,
+paid and mixed servers, including ones other operators run.
+
+| Server | Serves | Access |
 | --- | --- | --- |
-| `pir1` — `wss://weikeng1.bitcoinpir.org` | DPF server 0, HarmonyPIR hints, OnionPIR | **Required** for every metered frame |
-| `pir2` — `wss://weikeng2.bitcoinpir.org` | DPF server 1, HarmonyPIR queries, Direct ORAM | Not charged today |
+| `pir1` — `wss://weikeng1.bitcoinpir.org` | DPF server 0, HarmonyPIR hints, OnionPIR | DPF **best-effort**; HarmonyPIR hints and OnionPIR **paid** |
+| `pir2` — `wss://weikeng2.bitcoinpir.org` | DPF server 1, HarmonyPIR queries, Direct ORAM | Not charged today; its next image makes DPF and Direct ORAM best-effort and HarmonyPIR queries paid |
 
-So **Direct ORAM (the ORAM TEE backend) is the free path today**: it only
-talks to pir2. DPF, HarmonyPIR and OnionPIR all touch pir1 and need
-credits. A server tells the client which case applies in its
-`GET_INFO_JSON` answer (`"credits": { "enabled", "required" }`); the SDK
-reads it for you.
+So **DPF-PIR and Direct ORAM (the ORAM TEE backend) are free while the
+servers have room**; HarmonyPIR and OnionPIR need credits.
+
+A best-effort frame goes out unpaid. When the server's free lane is full
+it answers `free capacity busy: …`; the SDK then pays for the frame and
+sends it again if the wallet has credits, and reports the busy answer
+otherwise. Whether a lookup is served free, queued or refused depends only
+on the server's load and the connection's balance, never on what is
+looked up.
 
 <Callout kind="note" title="Try it without paying">
-The [playground](/playground) runs the ORAM TEE backend for free. For the
-three PIR backends it shows exactly where a lookup stops without credits.
+The [playground](/playground) runs DPF-PIR and the ORAM TEE backend for
+free. For HarmonyPIR and OnionPIR it shows exactly where a lookup stops
+without credits.
 </Callout>
 
 ## Price
@@ -34,7 +45,7 @@ three PIR backends it shows exactly where a lookup stops without credits.
 | Credential lifetime | until the end of the 90-day epoch it was bought in, plus 30 days |
 
 Rate card for one single-address lookup, when both servers of a backend
-charge (docs/CREDITS.md): DPF ≈ 2, HarmonyPIR ≈ 5 (fresh hint set),
+charge for it (docs/CREDITS.md): DPF ≈ 2, HarmonyPIR ≈ 5 (fresh hint set),
 OnionPIR ≈ 10, Direct ORAM ≈ 1 credits. Servers meter real work in gas
 (1 credit = 72,000 gas; a fixed 20 gas per frame plus 1,000 gas per MB of
 response), so a batch costs less per address than a single lookup.
@@ -75,21 +86,23 @@ type CreditProvider = (credits: number) =>
 ### WASM clients (DPF, HarmonyPIR, Direct ORAM)
 
 Call `enableCredits` **after** the sealed channel (presentations are
-bearer material). It reads the server's flags and, where credits are
-required, funds that connection's metered frames from the provider:
+bearer material). It reads the server's policy for the client's backend
+and funds that connection's paid frames from the provider — or, on a
+best-effort server, only the frames its busy free lane refuses:
 
 ```ts
 await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);
 
-// 'not-enabled' | 'not-required' | 'required'
+// 'not-enabled' | 'not-required' | 'required' | 'best-effort'
 const s0 = await client.enableCredits(0, wallet.present.bind(wallet)); // pir1
 const s1 = await client.enableCredits(1, wallet.present.bind(wallet)); // pir2
 ```
 
 `WasmOramClient.enableCredits(provider)` takes no server index (one
-server). With an empty provider, a server that requires credits refuses
+server). With an empty provider, a backend a server charges for stops at
 the first metered frame with `credits required: this frame needs N more
-credit(s) and the wallet has none`.
+credit(s) and the wallet has none`, and a best-effort backend whose free
+lane is full returns the server's `free capacity busy: …`.
 
 ### TypeScript adapters and the OnionPIR client
 
@@ -148,4 +161,5 @@ a wallet served from another origin needs to be added on the issuer
 `pir_sdk_client::credit_transport` has the same shape: implement
 `CreditProvider` (`present(&self, credits) -> PirResult<Option<Presentation>>`)
 and call the client's `enable_credits(server_index, provider)` after the
-secure-channel upgrade.
+secure-channel upgrade; it returns the server's `CreditStatus` for that
+backend (`NotEnabled`, `NotRequired`, `Required` or `BestEffort`).

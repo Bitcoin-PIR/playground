@@ -8,12 +8,13 @@ the [SDK](/docs/sdk/typescript) handles the routing.
 
 | Endpoint                          | Short name | Role            | Hardware              | SEV-SNP | Credits |
 | --------------------------------- | ---------- | --------------- | --------------------- | ------- | ------- |
-| `wss://weikeng1.bitcoinpir.org`   | pir1       | **Hint server** (+ DPF server 0, OnionPIR) | Hetzner i7-8700 | No | Required |
+| `wss://weikeng1.bitcoinpir.org`   | pir1       | **Hint server** (+ DPF server 0, OnionPIR) | Hetzner i7-8700 | No | DPF free while it has room; HarmonyPIR hints and OnionPIR paid |
 | `wss://weikeng2.bitcoinpir.org`   | pir2       | **Query server** (+ DPF server 1, Direct ORAM) | VPSBG (Tier 3 UKI) | Yes | Not charged today |
 
-Every metered frame on pir1 is paid in [credits](/docs/sdk/payments), so
-DPF, HarmonyPIR and OnionPIR need a credit provider; Direct ORAM only
-talks to pir2 and is the free path today.
+Each server publishes what it charges per backend
+([Payments](/docs/sdk/payments)): DPF-PIR and Direct ORAM are free while
+the servers have room, while HarmonyPIR hints and OnionPIR on pir1 need a
+credit provider.
 
 This split is intentional. The query server — the one that sees the
 per-query traffic — runs on attested hardware with the strongest
