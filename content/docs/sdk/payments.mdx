@@ -54,7 +54,7 @@ response), so a batch costs less per address than a single lookup.
 
 1. **Buy.** The wallet asks the Cashu mint (`https://mint.bitcoinpir.org`)
    for a Lightning invoice, pays it, mints ecash, and trades the ecash at
-   the issuer (`https://cashier.bitcoinpir.org`, `POST /v2/credentials`)
+   the issuer (`https://issuer.bitcoinpir.org`, `POST /v2/credentials`)
    for a **blindly signed ARC credential** worth 100 presentations.
 2. **Spend.** After the sealed channel is up, the client presents credits
    on each connection that needs them (`REQ_CREDIT_PRESENT`, opcode
@@ -126,10 +126,10 @@ new OramPirClientAdapter({
 import {
   IssuerClient, CreditStore, CreditWallet,
   purchaseCredential, cashuLightningRail, sdkArcFactories,
-  PRODUCTION_CASHIER_URL,
+  PRODUCTION_ISSUER_URL,
 } from 'bitcoin-pir-web';
 
-const issuer = new IssuerClient(PRODUCTION_CASHIER_URL);
+const issuer = new IssuerClient(PRODUCTION_ISSUER_URL);
 const store = new CreditStore();                 // localStorage
 const info = await issuer.info();                // offers, mints, ARC key
 

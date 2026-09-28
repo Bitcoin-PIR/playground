@@ -94,7 +94,7 @@ declare module 'bitcoin-pir-web' {
   export const PIR2_PROVIDER: ProductionProviderPin;
   /** The production Direct ORAM request shape (25 padded slots). */
   export const PRODUCTION_ORAM_BATCH_PLANNER: Readonly<Record<string, number>>;
-  export const PRODUCTION_CASHIER_URL: string;
+  export const PRODUCTION_ISSUER_URL: string;
   export interface CreditEnablement { state: 'not-enabled' | 'not-required' | 'required' | 'best-effort' | 'error'; error?: string; }
   export class OramPirClientAdapter {
     constructor(config: {
