@@ -135,9 +135,12 @@ the server's load, never on the address looked up.
 
 ### `sevStatus: noSevHost`
 
-The server's host is not SEV-SNP-capable. Expected for the hint
-server (`pir1`). If you see this on `pir2`, the operator switched it
-to Slice 2 (recovery mode) — see the [attestation walkthrough](/docs/privacy/attestation).
+The server's host is not SEV-SNP-capable. Expected for both live
+servers: `pir1`, and since 2026-10-02 `pir2`, which runs on a MacBook
+without a TEE. Pin the binary hash and require the operator-signed
+identity instead. On a host that should be a TEE (e.g. a future Direct
+ORAM host), it means the operator switched it to Slice 2 (recovery
+mode) — see the [attestation walkthrough](/docs/privacy/attestation).
 
 ### `sevStatus: reportDataMismatch`
 
@@ -158,8 +161,9 @@ ARK. Could be:
 
 ### `MEASUREMENT does not match pin`
 
-The query server is running a different UKI image than the operator
-published. Could be:
+Only a TEE host has a MEASUREMENT pin (no live server does since
+2026-10-02). The server is running a different UKI image than the
+operator published. Could be:
 
 - The operator deployed a new image and hasn't updated the public
   pin yet — coordinate with the operator before trusting.

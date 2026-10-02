@@ -7,9 +7,11 @@ published?**
 
 Without attestation, a wallet that's careful about wire-shape leakage
 is still trusting whoever runs the server not to swap the binary out
-for a logging one. Attestation closes that gap by binding the
-WebSocket session to a signed, hardware-attested measurement of the
-software stack.
+for a logging one. On a TEE host, attestation closes that gap by
+binding the WebSocket session to a signed, hardware-attested
+measurement of the software stack. On a host without one, it pins the
+binary the server reports and binds the session to the operator's
+signed identity instead.
 
 ## The two-server split
 
@@ -18,7 +20,7 @@ The reference deployment uses two servers with different roles:
 | Server                       | Role  | SEV-SNP | Why                                    |
 | ---------------------------- | ----- | ------- | -------------------------------------- |
 | `wss://weikeng1.bitcoinpir.org` | Hint  | No (Hetzner) | Sees only the hint blob — never query traffic. |
-| `wss://weikeng2.bitcoinpir.org` | Query | Yes (VPSBG, Tier 3) | Sees the per-query traffic — needs the strongest binding. |
+| `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` | Query | No (MacBook) | Sees the per-query traffic. |
 
 The query server is the one whose binary a wallet really wants to
 pin. Hint traffic alone reveals nothing about what the user is
@@ -26,7 +28,19 @@ querying (an attacker who runs only the hint server can't replay
 queries — the secret-shared sketch lives in the *query* server's
 state).
 
+<Callout kind="warn" title="No TEE on the query server since 2026-10-02">
+The query server used to be a VPSBG AMD SEV-SNP host (Tier 3, below) at
+`wss://weikeng2.bitcoinpir.org`. That host was retired on 2026-10-02.
+The pir2 roles now run on a MacBook without a TEE (server id
+`pir2-macbook-v1`), so both live servers are checked the same way: a
+binary pin plus the operator-signed identity. Direct ORAM needs a TEE
+and is paused until a new VPSBG TEE host exists.
+</Callout>
+
 ## What "Tier 3" means
+
+No live server runs Tier 3 today; this is the shape a TEE host uses
+(pir2 until 2026-10-02, and Direct ORAM's next host).
 
 Tier 3 is a deployment shape: the **entire** software stack — kernel,
 initramfs, command line, server binary — is packed into a single
@@ -45,46 +59,72 @@ measured.
 
 ## The full verification flow
 
-A wallet that wants the strongest binding does this:
+Neither live server has a TEE, so a wallet pins each server's binary
+and requires each server's operator-signed identity before it sends
+any credits or query frame:
 
 ```ts
 import {
-  AMD_TURIN_ARK_FINGERPRINT,
-  PIR2_TIER3_PIN,
-  PIR1_PIN,
-} from './attest-pin';
+  gateOperatorIdentity,
+  PIR1_PROVIDER,  // pir1: endpoint, PIR1_PIN, server id, operator key
+  PIR2_PROVIDER,  // pir2: endpoint, PIR2_MACBOOK_PIN, server id, operator key
+} from 'bitcoin-pir-web';
 
 const attest0 = await client.attest(0);  // hint server
 const attest1 = await client.attest(1);  // query server
 
-// --- Step 1: bind to AMD silicon (only the query server has SEV) ---
-if (attest1.sevStatus !== 'reportDataMatch') {
-  throw new Error(`SEV-SNP report did not bind: ${attest1.sevStatus}`);
+// --- Step 1: pin the operator's published binaries. Both servers
+// report `noSevHost`: the hash is self-reported, so it catches drift
+// from the published build but no hardware vouches for it. ---
+if (attest0.binarySha256Hex !== PIR1_PROVIDER.serverPin.binarySha256Hex) {
+  throw new Error('Hint server binary hash drift');
 }
-
-await attest1.verifyVcekChain(AMD_TURIN_ARK_FINGERPRINT);
-// Now we know: the SEV-SNP report is signed by a real AMD Turin chip
-// whose ARK matches the operator's pin. The report itself is
-// cryptographically trustworthy.
-
-// --- Step 2: pin the operator's published values ---
-if (attest1.launchMeasurementHex !== PIR2_TIER3_PIN.measurementHex) {
-  throw new Error('Query server is running a different MEASUREMENT than expected');
-}
-if (attest1.binarySha256Hex !== PIR2_TIER3_PIN.binarySha256Hex) {
+if (attest1.binarySha256Hex !== PIR2_PROVIDER.serverPin.binarySha256Hex) {
   throw new Error('Query server binary hash drift');
 }
 
-// --- Step 3: pin the hint server too (no SEV — binary hash only) ---
-if (attest0.binarySha256Hex !== PIR1_PIN.binarySha256Hex) {
-  throw new Error('Hint server binary hash drift');
-}
-
-// --- Step 4: upgrade to the AEAD-sealed channel ---
+// --- Step 2: upgrade to the AEAD-sealed channel ---
 await client.upgradeToSecureChannel(
   attest0.serverStaticPub,
   attest1.serverStaticPub,
 );
+
+// --- Step 3: require the operator-signed identity of each server.
+// Without a TEE this is what ties the channel key to the operator. ---
+const now = BigInt(Math.floor(Date.now() / 1000));
+for (const [i, p, att] of [[0, PIR1_PROVIDER, attest0], [1, PIR2_PROVIDER, attest1]] as const) {
+  const v = await client.announce(i);
+  const id = gateOperatorIdentity(v, p.operatorPubkey, att.serverStaticPub, now);
+  v.free();
+  if (id.state !== 'verified' || id.serverId !== p.stableServerId
+      || id.binarySha256Hex !== p.serverPin.binarySha256Hex) {
+    throw new Error(`server ${i}: operator identity ${id.state}`);
+  }
+}
+```
+
+The TypeScript adapters do all of this in strict mode
+(`strictVerification: true`): a `noSevHost` server is admitted only with
+a binary pin and a verified operator identity.
+
+### On a TEE host
+
+A server inside an AMD SEV-SNP guest (pir2 until 2026-10-02; Direct
+ORAM's next host) adds hardware evidence before the channel upgrade,
+where `pin` is that host's `ServerAttestPin` from `attest-pin.ts`:
+
+```ts
+import { AMD_TURIN_ARK_FINGERPRINT } from 'bitcoin-pir-web';
+
+if (attest.sevStatus !== 'reportDataMatch') {
+  throw new Error(`SEV-SNP report did not bind: ${attest.sevStatus}`);
+}
+attest.verifyVcekChain(AMD_TURIN_ARK_FINGERPRINT);
+// The SEV-SNP report is signed by a real AMD Turin chip whose ARK
+// matches the operator's pin.
+if (attest.launchMeasurementHex !== pin.measurementHex) {
+  throw new Error('Server is running a different MEASUREMENT than expected');
+}
 ```
 
 ## What's actually being verified
@@ -128,14 +168,28 @@ lives inside the initramfs, which is part of the UKI, which is part
 of MEASUREMENT). For Slice 2, the binary hash is server-self-reported
 and the operator publishes it via a separate channel.
 
-The `binarySha256Hex` is also pinnable independently — useful for the
-hint server, which is on hardware without SEV.
+The `binarySha256Hex` is also pinnable independently — the only pin
+for a host without SEV (both live servers today).
 
 ### `sevStatus`
 
 A string enum: `noSevHost`, `reportDataMatch`, `reportDataMismatch`,
-`malformedReport`. Any value other than `reportDataMatch` means the
-self-reported fields cannot be trusted.
+`malformedReport`. Any value other than `reportDataMatch` means no
+hardware vouches for the self-reported fields. `noSevHost` is expected
+on both live servers; there the operator-signed identity has to carry
+the binding instead.
+
+### `gateOperatorIdentity`
+
+Checks a server's `announce()` bundle (`REQ_ANNOUNCE`) against the
+pinned operator key: the operator's key certified a server identity
+key for a server id, and that identity key signed a bundle naming the
+channel key and the binary hash. It returns `state: 'verified'` only
+when the certificate is signed by your pinned operator key and inside
+its validity window, the bundle's channel key equals the attested one,
+and the bundle is not future-dated. Compare `serverId` and
+`binarySha256Hex` with the provider's pins yourself, as in the flow
+above.
 
 ## Operator pins
 
@@ -143,42 +197,33 @@ The reference operator publishes pins in
 [`web/src/attest-pin.ts`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/attest-pin.ts).
 For wallets shipping with the reference deployment, bake those values
 into your bundle at build time and resync whenever the operator
-redeploys (the values rotate per Nix-built binary). The expected
-values as of **2026-05-20 (Tier 3 UKI v18)**:
+redeploys (the values rotate with every binary). The pins as of
+**2026-10-02**:
 
-```ts
-// AMD Turin family ARK fingerprint — same across all Turin chips
-AMD_TURIN_ARK_FINGERPRINT_HEX =
-  '1f084161a44bb6d93778a904877d4819cafa5d05ef4193b2ded9dd9c73dd3f6a';
+| Pin | Server | Pins |
+| --- | --- | --- |
+| `PIR1_PIN` | pir1 (Hetzner, no SEV) | binary SHA-256 |
+| `PIR2_MACBOOK_PIN` | pir2 (MacBook, no TEE) | binary SHA-256 |
+| `PIR2_TIER3_PIN` | the retired VPSBG pir2 | historical record only (binary + SEV-SNP MEASUREMENT); no live server matches it |
+| `AMD_TURIN_ARK_FINGERPRINT` | any SEV-SNP host | AMD's Turin root key |
 
-// pir2 (query server) — Tier 3 UKI v18, SEV-SNP
-PIR2_TIER3_PIN = {
-  measurementHex:
-    '53eb00331081ed7ee27df20a40c7d8d9be4c0a6a93cf043e876508a0f1fc74658987c03cceced379b5bf23e715a9435b',
-  binarySha256Hex:
-    '2ba6e79c388f54867988885785512f42864d5ceb3b88d1e1d5b8d24459d2f46c',
-};
-
-// pir1 (hint server) — Hetzner i7-8700, no SEV (binary hash only).
-// pir1 and pir2 currently run the SAME reproducibly-built binary,
-// so the `binarySha256Hex` matches across both pins.
-PIR1_PIN = {
-  binarySha256Hex:
-    '2ba6e79c388f54867988885785512f42864d5ceb3b88d1e1d5b8d24459d2f46c',
-};
-```
+`PIR1_PROVIDER` and `PIR2_PROVIDER` (`production-providers.ts`) pair
+each binary pin with the endpoint, the expected server id and the
+operator key the identity check needs. `ORAM_PROVIDER` is `null` while
+Direct ORAM is paused.
 
 <Callout kind="warn" title="These values rotate on every operator redeploy">
 A wallet baking these into its bundle will refuse to connect after
-the operator publishes a new Nix-built binary. Either resync from
+the operator publishes a new binary. Either resync from
 `vendor/bitcoinpir-web/attest-pin.ts` on every release, or fetch the
 current pins from a signed manifest you control. The playground
 itself reads from the vendored file, not from this doc.
 </Callout>
 
-Both servers run the same reproducible binary
-(`nix build .#unified-server`). `pir2` runs `--serve-queries` only
-(no hint pool, no OnionPIR); `pir1` runs the hint role.
+The two servers run different builds (pir1 on Linux x86-64, pir2 on
+macOS arm64), so `PIR1_PIN` and `PIR2_MACBOOK_PIN` differ. `pir2` runs
+`--serve-queries` only (no hint pool, no OnionPIR); `pir1` runs the
+hint role.
 
 ## What happens after the channel is upgraded
 
@@ -195,8 +240,9 @@ frame layer (ChaCha20-Poly1305). After this:
 
 This is **defense in depth on top of TLS** — TLS already encrypts in
 transit, but its certificate identity comes from a CA, not from
-hardware attestation. The AEAD layer binds the session to the
-attested binary directly.
+hardware attestation. The AEAD layer binds the session to the server's
+channel key: on a TEE host the hardware report vouches for that key,
+and on the live servers (no TEE) the operator-signed identity does.
 
 ## Skipping attestation
 
@@ -210,9 +256,9 @@ prototyping; production wallets should pin.
 
 When the operator deploys a new binary:
 
-1. The operator runs `bpir-admin attest wss://weikeng2.bitcoinpir.org`
-   against the new deployment to capture the new MEASUREMENT and
-   `binary_sha256`.
+1. The operator runs `bpir-admin attest <endpoint>` against the new
+   deployment to capture the new `binary_sha256` (and, on a TEE host,
+   the new MEASUREMENT).
 2. The pin file is updated in the reference repo (this is `web/src/attest-pin.ts`).
 3. Wallets ship a new bundle.
 

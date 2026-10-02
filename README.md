@@ -31,7 +31,10 @@ changes and commit the diff.
 ## Live servers
 
 - `wss://weikeng1.bitcoinpir.org` — hint server (Hetzner, no SEV)
-- `wss://weikeng2.bitcoinpir.org` — query server (VPSBG, SEV-SNP Tier 3)
+- `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` — query server (MacBook, no TEE)
+
+Direct ORAM is paused: it needs a TEE host, and none serves it since the
+VPSBG SEV-SNP pir2 (`weikeng2`) was retired on 2026-10-02.
 
 See [`content/docs/operations/endpoints.mdx`](content/docs/operations/endpoints.mdx)
 (or the deployed [Live endpoints](https://sdk.bitcoinpir.org/docs/operations/endpoints)

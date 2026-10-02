@@ -56,7 +56,8 @@ content/docs/**/*.mdx     14 MDX pages (quickstart, concepts,
                           attestation}, operations/endpoints, troubleshooting)
 lib/
   wasm-loader.ts          one-shot dynamic-import of pir-sdk-wasm
-  endpoints.ts            PIR1_URL = wss://weikeng1, PIR2_URL = wss://weikeng2
+  endpoints.ts            PIR1_URL = wss://weikeng1, PIR2_URL = wss://bitcoin-pir-
+                          weikeng-laptop.chenweikeng.com (pir2 MacBook node)
   address.ts              parseAddress() → {spk, sh160, scriptType}
   snippet.ts              per-backend TS snippet generator (seeds the editable
                           runner — must stay RUNNABLE, not just illustrative)
@@ -145,12 +146,14 @@ Source of truth: CLAUDE.md in the main `Bitcoin-PIR/Bitcoin-PIR` repo. Mirror he
 
 | Endpoint | Role | Hardware | Attestation |
 | --- | --- | --- | --- |
-| `wss://weikeng1.bitcoinpir.org` | hint + DPF server 0 + OnionPIR — **credits required** | Hetzner i7-8700 (no SEV) | binary SHA-256 pin only |
-| `wss://weikeng2.bitcoinpir.org` | DPF server 1 + HarmonyPIR query + **Direct ORAM** — not charged today | VPSBG SEV-SNP, Tier 3 UKI | SEV-SNP MEASUREMENT + binary SHA-256 |
+| `wss://weikeng1.bitcoinpir.org` (pir1) | hint + DPF server 0 + OnionPIR — DPF best-effort free, HarmonyPIR/OnionPIR paid | Hetzner i7-8700 (no SEV) | binary SHA-256 pin + operator-signed identity |
+| `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` (pir2, server id `pir2-macbook-v1`) | DPF server 1 + HarmonyPIR query — DPF best-effort free, HarmonyPIR paid | MacBook, macOS arm64, **no TEE** | binary SHA-256 pin + operator-signed identity |
 
-Pins live in `vendor/bitcoinpir-web/attest-pin.ts` (never copy the values into prose). Since the 2026-09 paid-access rollout the two servers run **different** binaries (pir2's adds the ORAM feature), so `PIR1_PIN` and `PIR2_TIER3_PIN` differ. Each server's `REQ_ANNOUNCE` identity is endorsed by **its own** operator key: gate the "verified operator" badge on `operatorIdentity.state === 'verified'` against `PIR1_PROVIDER.operatorPubkey` / `PIR2_PROVIDER.operatorPubkey` (`vendor/bitcoinpir-web/production-providers.ts`) plus the provider's `stableServerId` — never on `chainVerified` alone (a MITM can self-sign a consistent bundle). The legacy single `PIR_OPERATOR_PUBKEY` no longer matches pir2.
+The VPSBG SEV-SNP pir2 (`wss://weikeng2.bitcoinpir.org`) was retired on 2026-10-02 and that endpoint is down; `PIR2_TIER3_PIN` is kept upstream as a historical record only. **Direct ORAM is paused** until a new VPSBG TEE host exists: `ORAM_PROVIDER` is `null`, and the ORAM backend/snippet stop with `ORAM_PAUSED_MESSAGE`.
 
-Credits (main repo `docs/CREDITS.md`; site doc `content/docs/sdk/payments.mdx`): pir1 refuses metered frames until the connection is funded (`enableCredits` after the sealed channel). The playground has no wallet yet — its credit provider is empty, so DPF/HarmonyPIR/OnionPIR end in a "Payment required" result and ORAM TEE (pir2 only) is the free path and the default backend. Buying in the browser from this origin needs `sdk.bitcoinpir.org` in the issuer's `cors_origins`.
+Pins live in `vendor/bitcoinpir-web/attest-pin.ts` (never copy the values into prose). The two servers run **different** builds (pir1 Linux, pir2 macOS arm64), so `PIR1_PIN` and `PIR2_MACBOOK_PIN` differ. Each server's `REQ_ANNOUNCE` identity is endorsed by **its own** operator key: gate the "verified operator" badge on `operatorIdentity.state === 'verified'` against `PIR1_PROVIDER.operatorPubkey` / `PIR2_PROVIDER.operatorPubkey` (`vendor/bitcoinpir-web/production-providers.ts`) plus the provider's `stableServerId` — never on `chainVerified` alone (a MITM can self-sign a consistent bundle). The legacy single `PIR_OPERATOR_PUBKEY` no longer matches pir2. With no TEE on either server, the structured DPF/HarmonyPIR path ("Run query") refuses to query unless every `noSevHost` leg has a verified identity whose signed binary matches the pin (`noTeeLegFailures` in `lib/playground-clients.ts`, mirroring upstream strict mode); the DPF/HarmonyPIR snippets do the same check.
+
+Credits (main repo `docs/CREDITS.md`; site doc `content/docs/sdk/payments.mdx`): a server refuses metered frames it charges for until the connection is funded (`enableCredits` after the sealed channel). The playground has no wallet yet — its credit provider is empty, so HarmonyPIR/OnionPIR end in a "Payment required" result, and DPF (free while the servers have room) is the default backend. Buying in the browser from this origin needs `sdk.bitcoinpir.org` in the issuer's `cors_origins`.
 
 If a redeploy bumps either SHA or MEASUREMENT: update `vendor/bitcoinpir-web/attest-pin.ts` in the main repo, push, resync vendor here.
 
@@ -174,6 +177,14 @@ npm run copy-monaco             # self-host Monaco assets (auto on predev/prebui
 Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
+
+## Recent history (2026-10-02) — pir2 moves to the MacBook node (no TEE), Direct ORAM paused
+
+The VPSBG SEV-SNP pir2 (`weikeng2`) was retired; upstream #359 moved the pir2 slot to a MacBook without a TEE and paused Direct ORAM.
+- **Vendor** re-synced from BitcoinPIR `5667fd4b`: web/src only (`PIR2_MACBOOK_PIN`, `PIR2_PROVIDER` → MacBook, `ORAM_PROVIDER = null`, `ORAM_PAUSED_MESSAGE`, plus the x402 rail `x402.ts`/`bolt11.ts`). The wasm is byte-identical (no wasm-relevant crate changed since `a45ebbb8`). `@noble/curves` + `@noble/hashes` 2.4.0 declared because `bolt11.ts` imports them (same exact pins as upstream `web/package.json`).
+- **Query layer**: pir2 leg pinned via `PIR2_PROVIDER.serverPin`; ORAM config built from `ORAM_PROVIDER`, throwing `ORAM_PAUSED_MESSAGE` while null; `noTeeLegFailures` gates DPF/HarmonyPIR on a verified identity for every `noSevHost` leg (pir1 included). Default backend is DPF; the ORAM tab says paused.
+- **Snippets/docs**: DPF/HarmonyPIR snippets replace the pir2 SEV checks with binary pins + the identity check; the ORAM snippet guards on `ORAM_PROVIDER`; landing, playground, README and docs describe pir2 as the MacBook node (no TEE) and ORAM as paused.
+- **Verified live** from a local dev build: DPF returns the known-good 2 UTXOs / 1,284 sat for `1Q2TWHE3…` with both servers pin-matched (pir2's binary = `PIR2_MACBOOK_PIN`) and operator-endorsed, and credits best-effort on both; the DPF snippet runs verbatim; HarmonyPIR verifies both legs, then stops at "Payment required"; ORAM shows the paused notice and stops with `ORAM_PAUSED_MESSAGE`; the explorer's cleartext DPF run for `1D4HSHPJ…` completes with all invariants PASS.
 
 ## Recent history (2026-09-23) — credits-era re-vendor, ORAM TEE, payments doc
 
@@ -305,12 +316,14 @@ Migrated from `bitcoin-pir.github.io/playground/` → `sdk.bitcoinpir.org`:
 | `ERR_CERT_COMMON_NAME_INVALID` on `sdk.bitcoinpir.org` | Cert hasn't provisioned yet OR Cloudflare proxy is on but SSL mode is Flexible | Wait 5-30 min; verify `gh api repos/Bitcoin-PIR/playground/pages` shows `https_certificate.state` = `issued`/`approved`; ensure Cloudflare proxy is OFF or SSL = Full (strict) |
 | Pages workflow fails on push | Probably typecheck or lint regression introduced upstream | `npm run typecheck` + `npm run lint` locally, fix, push |
 | `OnionPIR — Failed to fetch /wasm/onionpir_client.mjs` | `NEXT_PUBLIC_BASE_PATH` not in sync with deploy path | Verify `next.config.mjs` env block matches the deploy URL (root = `''`, subpath = `/playground`) |
-| Live HarmonyPIR query emits ~622 hint frames again | The new server binary got rolled back, or pir1/pir2 are running the pre-#7 binary | Re-run `nix build .#unified-server` + redeploy on pir1; rebuild UKI (current: v24) + redeploy on pir2 |
+| Live HarmonyPIR query emits ~622 hint frames again | The new server binary got rolled back, or pir1/pir2 are running the pre-#7 binary | Re-run `nix build .#unified-server` + redeploy on pir1; redeploy the pir2 MacBook node (main repo `docs/runbooks/pir2-macbook-replacement.md`) |
 | `UNKNOWN_0x44` / `UNKNOWN_0x46` reappears in the wire timeline | Vendor `constants.ts` got resynced from a pre-#5 commit | Resync from main `>= 7d54428d` |
 
 ---
 
 ## Pin / hash reference (as of 2026-06-11)
+
+Historical snapshot; current pins are in `vendor/bitcoinpir-web/attest-pin.ts`. Since 2026-10-02 no live server is SEV-SNP (see Servers above).
 
 - Reproducible unified_server binary: SHA-256 `bb2cf422f90ab8f8033ba42203cb95af3e0d3fd45ad3480ec8fb0f7a54922439` (v24, 2026-06 security review)
 - Tier 3 UKI: **v24** (2026-06-11) — the SEV-SNP MEASUREMENT below is the attested value; clients pin the binary SHA + MEASUREMENT, not the UKI file (upstream notes UKI file sha256 `4eefec07…`).

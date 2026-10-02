@@ -38,8 +38,8 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
                 About {result.paymentRequired.approxCredits} credit
                 {result.paymentRequired.approxCredits === 1 ? '' : 's'} (≈{' '}
                 {result.paymentRequired.approxCredits * CREDIT_SAT} sat) per single-address lookup
-                when every server of this backend charges. DPF-PIR and ORAM TEE are free while the
-                servers have room.{' '}
+                when every server of this backend charges. DPF-PIR is free while the servers have
+                room.{' '}
                 <Link href="/docs/sdk/payments" className="underline">
                   How payments work
                 </Link>

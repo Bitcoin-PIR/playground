@@ -165,6 +165,7 @@ export {
   MAINNET_948454_DB_PROOF_PIN,
   MAINNET_948454_ORAM_SOURCE_DB_PROOF_PIN,
   PIR1_PIN,
+  PIR2_MACBOOK_PIN,
   PIR2_TIER3_PIN,
   PRODUCTION_DB_PROOF_PINS,
   PRODUCTION_ONION_DB_PROOF_V2_PINS,
@@ -309,8 +310,21 @@ export {
 } from './stale-chunk-reload.js';
 
 export {
+  ORAM_PAUSED_MESSAGE,
+  ORAM_PROVIDER,
   PIR1_PROVIDER,
   PIR2_PROVIDER,
   PRODUCTION_ORAM_BATCH_PLANNER,
   type ProductionProviderPin,
 } from './production-providers.js';
+
+export {
+  purchaseCredentialX402,
+  requestChallenge as x402RequestChallenge,
+  validateChallenge as x402ValidateChallenge,
+  waitForPayment as x402WaitForPayment,
+  settle as x402Settle,
+  http1Binding as x402Http1Binding,
+  X402_NETWORK_MAINNET,
+} from './x402.js';
+export type { PaymentRequired, PaymentRequirements, ValidatedChallenge, WebLnLike } from './x402.js';

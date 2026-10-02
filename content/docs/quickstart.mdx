@@ -60,13 +60,13 @@ You only need to call `init()` once. Subsequent imports are no-ops.
 ## 3. Connect to the live servers
 
 The reference deployment runs two servers — the [hint
-server](/docs/operations/endpoints) and the SEV-attested **query
-server**. Both URLs go to the `WasmDpfClient` constructor in order:
+server](/docs/operations/endpoints) and the **query server**. Both URLs
+go to the `WasmDpfClient` constructor in order:
 
 ```ts
 const client = new WasmDpfClient(
-  'wss://weikeng1.bitcoinpir.org',   // hint server
-  'wss://weikeng2.bitcoinpir.org',   // query server
+  'wss://weikeng1.bitcoinpir.org',                      // hint server
+  'wss://bitcoin-pir-weikeng-laptop.chenweikeng.com',   // query server
 );
 
 await client.connect();
@@ -145,33 +145,35 @@ That's the full flow. Three things to call out:
 
 ## 5. Verify privacy (optional but recommended)
 
-If you want to confirm the live server is what it claims to be —
-running the exact reproducible binary, on SEV-SNP hardware, with the
-operator-published MEASUREMENT — call `attest()` and follow the
-[attestation walkthrough](/docs/privacy/attestation):
+If you want to confirm the live servers are what they claim to be —
+running the operator-published binary, under the operator's signed
+identity — call `attest()` and follow the [attestation
+walkthrough](/docs/privacy/attestation). Neither live server has a TEE
+(both report `sevStatus: noSevHost`), so there is no SEV-SNP report or
+MEASUREMENT to check:
 
 ```ts
-import { AMD_TURIN_ARK_FINGERPRINT, PIR2_TIER3_PIN } from './attest-pin';
+import { PIR1_PIN, PIR2_MACBOOK_PIN } from './attest-pin';
 
-const attest = await client.attest(1); // 1 = query server
+const attest0 = await client.attest(0); // 0 = hint server
+const attest1 = await client.attest(1); // 1 = query server
 
-// 1. Verify the SEV-SNP report's certificate chain back to AMD's
-//    root key.
-await attest.verifyVcekChain(AMD_TURIN_ARK_FINGERPRINT);
-
-// 2. Compare the launch MEASUREMENT to your build-time pin.
-if (attest.launchMeasurementHex !== PIR2_TIER3_PIN.measurementHex) {
-  throw new Error('Server is running a different image than expected');
+// 1. Compare each server's binary hash to your build-time pin.
+if (attest0.binarySha256Hex !== PIR1_PIN.binarySha256Hex
+    || attest1.binarySha256Hex !== PIR2_MACBOOK_PIN.binarySha256Hex) {
+  throw new Error('Server is running a different binary than expected');
 }
 
-// 3. Now that you've validated the server identity, upgrade to the
-//    encrypted channel so cloudflared (or any other TLS-terminating
-//    intermediary) sees only ciphertext.
-const attest0 = await client.attest(0);
+// 2. Upgrade to the encrypted channel so cloudflared (or any other
+//    TLS-terminating intermediary) sees only ciphertext.
 await client.upgradeToSecureChannel(
   attest0.serverStaticPub,
-  attest.serverStaticPub,
+  attest1.serverStaticPub,
 );
+
+// 3. Without a TEE, the operator-signed identity is what ties each
+//    channel key to the operator: require it before the first query
+//    (`announce()` + `gateOperatorIdentity`, see the walkthrough).
 ```
 
 The wire to `upgradeToSecureChannel` is AEAD-sealed end-to-end with

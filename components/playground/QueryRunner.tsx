@@ -8,11 +8,12 @@ import { EditableRunner } from './EditableRunner';
 import { QuickStartCard } from './QuickStartCard';
 import { parseAddress } from '@/lib/address';
 import { runQuery, type PlaygroundQueryResult } from '@/lib/playground-clients';
+import { ORAM_PAUSED_MESSAGE, ORAM_PROVIDER } from '@vendor/web/production-providers';
 
 export function QueryRunner() {
-  // DPF-PIR and ORAM TEE are free while the servers have room; HarmonyPIR and
-  // OnionPIR need credits on pir1 (see /docs/sdk/payments).
-  const [backend, setBackend] = useState<Backend>('oram');
+  // DPF-PIR is free while the servers have room; HarmonyPIR and OnionPIR need
+  // credits (see /docs/sdk/payments). Direct ORAM is paused: no TEE host.
+  const [backend, setBackend] = useState<Backend>('dpf');
   const [address, setAddress] = useState('');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +59,11 @@ export function QueryRunner() {
           Backend
         </h2>
         <BackendSelector value={backend} onChange={setBackend} />
+        {backend === 'oram' && !ORAM_PROVIDER && (
+          <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            {ORAM_PAUSED_MESSAGE} DPF-PIR, HarmonyPIR and OnionPIR are available.
+          </p>
+        )}
       </div>
 
       <AddressInput value={address} onChange={setAddress} disabled={running} />

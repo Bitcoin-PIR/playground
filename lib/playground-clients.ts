@@ -28,7 +28,6 @@ import { HINT_URL, PIR1_URL, PIR2_URL, QUERY_URL } from './endpoints';
 import {
   AMD_TURIN_ARK_FINGERPRINT,
   PIR1_PIN,
-  PIR2_TIER3_PIN,
   PRODUCTION_ORAM_DB_PROOF_V2_PINS,
   type ServerAttestPin,
 } from '@vendor/web/attest-pin';
@@ -41,6 +40,8 @@ import type { WasmAnnounceVerification } from '@vendor/web/sdk-bridge';
 import { OnionPirWebClient } from '@vendor/web/onionpir_client';
 import { OramPirClientAdapter } from '@vendor/web/oram-adapter';
 import {
+  ORAM_PAUSED_MESSAGE,
+  ORAM_PROVIDER,
   PIR1_PROVIDER,
   PIR2_PROVIDER,
   PRODUCTION_ORAM_BATCH_PLANNER,
@@ -56,7 +57,7 @@ export interface AttestationSummary {
   url: string;
   /** Free-form label ("hint" / "query" / "OnionPIR" / "ORAM"). */
   label: string;
-  /** State: `verified-vcek` is the strongest, `unsupported` means no SEV (Hetzner). */
+  /** State: `verified-vcek` is the strongest, `unsupported` means no SEV (pir1, the pir2 MacBook node). */
   state: 'verified' | 'verified-vcek' | 'unsupported' | 'mismatch' | 'error';
   /** Detail for the badge tooltip (e.g. the SEV report-data status). */
   detail: string;
@@ -252,7 +253,7 @@ async function attestAndUpgrade(
         detail = pinError;
       } else if (noSev) {
         state = 'unsupported';
-        detail = 'No SEV-SNP on this host (Hetzner i7-8700); binary pin only';
+        detail = 'No SEV-SNP on this host; binary pin + operator-signed identity';
       } else if (!matched) {
         state = 'mismatch';
         detail = `sevStatus=${v.sevStatus}`;
@@ -372,6 +373,38 @@ async function verifyOperatorIdentityOne(
   } finally {
     v.free();
   }
+}
+
+/**
+ * A leg without a TEE (`noSevHost`: pir1, and since 2026-10-02 the pir2
+ * MacBook node) has no hardware report binding its channel key; its
+ * operator-signed identity is what ties that key to the operator. As in the
+ * upstream strict mode (`collectStrictServerLegFailures`), such a leg needs a
+ * verified identity for its pinned server id (checked in
+ * verifyOperatorIdentityOne) whose signed binary hash matches the binary pin.
+ * Returns why the session must not query; empty when it may.
+ */
+function noTeeLegFailures(
+  servers: ServerLeg[],
+  attestation: AttestationSummary[],
+  operatorIdentity: OperatorIdentitySummary[],
+): string[] {
+  const failures: string[] = [];
+  servers.forEach((s, i) => {
+    if (attestation[i]?.state !== 'unsupported') return; // SEV-attested leg
+    const id = operatorIdentity[i]?.identity;
+    const pinned = s.pin.binarySha256Hex?.toLowerCase();
+    if (!pinned) {
+      failures.push(`${s.label}: no TEE and no binary pin`);
+    } else if (id?.state !== 'verified') {
+      failures.push(
+        `${s.label}: no TEE, and its operator-signed identity is ${id?.state ?? 'missing'}${id?.error ? ` (${id.error})` : ''}`,
+      );
+    } else if (id.binarySha256Hex?.toLowerCase() !== pinned) {
+      failures.push(`${s.label}: the operator-signed binary hash does not match the binary pin`);
+    }
+  });
+  return failures;
 }
 
 /**
@@ -497,6 +530,10 @@ async function runTwoServerQuery(
     if (!channelUpgraded) {
       throw new Error('attestation did not clear both servers; refusing to query over an unsealed channel');
     }
+    const identityFailures = noTeeLegFailures(servers, attestation, operatorIdentity);
+    if (identityFailures.length > 0) {
+      throw new Error(`refusing to query: ${identityFailures.join('; ')}`);
+    }
     const credits = await enableCreditsOnAll(
       client,
       servers,
@@ -565,7 +602,7 @@ const PIR1_LEG = (label: string, url: string): ServerLeg => ({
 const PIR2_LEG = (label: string, url: string): ServerLeg => ({
   url,
   label,
-  pin: PIR2_TIER3_PIN,
+  pin: PIR2_PROVIDER.serverPin,
   index: 1,
   operatorPubkey: PIR2_PROVIDER.operatorPubkey,
   stableServerId: PIR2_PROVIDER.stableServerId,
@@ -763,23 +800,27 @@ export async function runOnionPirQuery(
   }
 }
 
-// ── Direct ORAM backend (the free path) ───────────────────────────────────
+// ── Direct ORAM backend (paused: no TEE host) ─────────────────────────────
 
 /**
  * The production Direct ORAM client configuration, shared by the structured
  * "Run query" path and the snippet. Strict: attestation (AMD chain + pinned
- * binary + MEASUREMENT), the operator-signed identity of pir2, and a
+ * binary + MEASUREMENT), the operator-signed identity of the ORAM host, and a
  * database proof checked in the browser must all pass before any lookup, and
  * every lookup is one fixed-budget request (`PRODUCTION_ORAM_BATCH_PLANNER`).
+ * Throws `ORAM_PAUSED_MESSAGE` while `ORAM_PROVIDER` is null (no TEE host
+ * since the VPSBG pir2 was retired on 2026-10-02).
  */
 export function oramProductionConfig(creditProvider: CreditProvider = NO_CREDITS) {
+  const provider = ORAM_PROVIDER;
+  if (!provider) throw new Error(ORAM_PAUSED_MESSAGE);
   return {
-    serverUrl: PIR2_PROVIDER.endpoint,
+    serverUrl: provider.endpoint,
     strictVerification: true,
-    expectedArkFingerprint: AMD_TURIN_ARK_FINGERPRINT,
-    expectedServerPin: PIR2_PROVIDER.serverPin,
-    expectedServerId: PIR2_PROVIDER.stableServerId,
-    pinnedOperatorPubkey: PIR2_PROVIDER.operatorPubkey,
+    expectedArkFingerprint: provider.expectedArkFingerprint,
+    expectedServerPin: provider.serverPin,
+    expectedServerId: provider.stableServerId,
+    pinnedOperatorPubkey: provider.operatorPubkey,
     verifyOperatorIdentity: true,
     databaseProofPins: PRODUCTION_ORAM_DB_PROOF_V2_PINS,
     batchPlanner: PRODUCTION_ORAM_BATCH_PLANNER,
@@ -792,8 +833,10 @@ export async function runOramQuery(
   scriptPubKeyHex: string,
   options: PlaygroundQueryOptions = {},
 ): Promise<PlaygroundQueryResult> {
-  const url = PIR2_PROVIDER.endpoint;
-  const label = 'ORAM (pir2)';
+  const provider = ORAM_PROVIDER;
+  if (!provider) throw new Error(ORAM_PAUSED_MESSAGE);
+  const url = provider.endpoint;
+  const label = 'ORAM';
   const t0 = performance.now();
   const notes: string[] = [
     'Direct ORAM runs inside an AMD SEV-SNP guest: the server process sees the script hash, the host does not. Every lookup is one fixed-budget request (25 padded slots).',
@@ -806,7 +849,7 @@ export async function runOramQuery(
     },
   });
   const facts = (): SessionFacts => ({
-    attestation: [summarizeAdapterAttestation(url, label, PIR2_TIER3_PIN, client.attestation)],
+    attestation: [summarizeAdapterAttestation(url, label, provider.serverPin, client.attestation)],
     operatorIdentity: [{ label, identity: client.operatorIdentity }],
     credits: creditsInfo
       ? [{ label, state: (creditsInfo as CreditEnablement).state, error: (creditsInfo as CreditEnablement).error }]

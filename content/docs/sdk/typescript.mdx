@@ -20,7 +20,7 @@ npm install pir-sdk-wasm
 | --- | --- |
 | `WasmDpfClient` | Two-server DPF client. The default. |
 | `WasmHarmonyClient` | Two-server HarmonyPIR client with offline hint phase. |
-| `WasmOramClient` | One-server Direct ORAM client (AMD SEV-SNP). The free backend today; see [Payments](/docs/sdk/payments). |
+| `WasmOramClient` | One-server Direct ORAM client (AMD SEV-SNP). Paused since 2026-10-02: no TEE host serves it; see [Live endpoints](/docs/operations/endpoints). |
 | `WasmArcCredentialRequest`, `WasmArcCredential` | Credits: the blinded ARC credential request and the credential it finalizes into. |
 | `WasmQueryResult` | Per-script-hash result (UTXOs, balance, Merkle status). |
 | `WasmSyncResult` | A whole sync's worth of results, plus synced height. |
@@ -238,8 +238,9 @@ client.connect(): Promise<void>
 ```
 
 The hint server (`weikeng1` in the reference deployment) is the one
-that mints the per-database hint blob; the query server (`weikeng2`)
-serves the per-query responses against it.
+that mints the per-database hint blob; the query server (pir2,
+`bitcoin-pir-weikeng-laptop.chenweikeng.com`) serves the per-query
+responses against it.
 
 ### Sync + queries
 

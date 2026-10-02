@@ -56,13 +56,16 @@ around the wallet developer's job: integrate, debug, ship.
 ## Live servers
 
 The reference deployment uses two servers — split deliberately so that
-the SEV-attested query server only ever sees query traffic, never
-hints:
+the query server only ever sees query traffic, never hints:
 
 ```
-wss://weikeng1.bitcoinpir.org   hint   (Hetzner, no SEV)
-wss://weikeng2.bitcoinpir.org   query  (VPSBG, SEV-SNP Tier 3)
+wss://weikeng1.bitcoinpir.org                      hint   (Hetzner, no SEV)
+wss://bitcoin-pir-weikeng-laptop.chenweikeng.com   query  (MacBook, no TEE)
 ```
+
+Since 2026-10-02 the query server runs on a MacBook without a TEE (the
+VPSBG SEV-SNP host was retired), and Direct ORAM, which needs a TEE, is
+paused until a new VPSBG TEE host exists.
 
 Both speak [the same WebSocket protocol](/docs/protocol/wire-format).
 A wallet only needs to know *both* URLs and which is which; the SDK
