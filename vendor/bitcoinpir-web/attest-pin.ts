@@ -157,11 +157,13 @@ export const PIR2_TIER3_PIN: ServerAttestPin = {
  */
 export const PIR2_MACBOOK_PIN: ServerAttestPin = {
   // No measurementHex — no SEV on this host.
-  // unified_server built from ops/pir2-macbook-replacement (cb52047f, with the
-  // macOS self-hash fix), `--locked --release`, macOS arm64.
+  // unified_server built on the MacBook from main 197511f8 (streaming
+  // manifest hash #362, half-hint pricing #364, operator API keys #365),
+  // `--locked --release`, macOS arm64. Access policy --require-credits
+  // --access dpf=best-effort:2 --access harmony=best-effort:2.
   binarySha256Hex:
-    '42d9a9aad8a762782c68ea8039a24701b4a0758a679df0fa0f8302ceb5e775e7',
-  description: 'bitcoin-pir-weikeng-laptop.chenweikeng.com (MacBook, no TEE: DPF server 1 + HarmonyPIR query, credits with DPF best-effort free and HarmonyPIR paid; Direct ORAM paused)',
+    '368535896775d9526aa09f6dd4c2c8d6340f76fa82699b88d653acf6067fc591',
+  description: 'bitcoin-pir-weikeng-laptop.chenweikeng.com (MacBook, no TEE: DPF server 1 + HarmonyPIR query, DPF and HarmonyPIR best-effort free; operator API keys; Direct ORAM paused)',
 };
 
 /**
@@ -174,14 +176,15 @@ export const PIR2_MACBOOK_PIN: ServerAttestPin = {
  */
 export const PIR1_PIN: ServerAttestPin = {
   // No measurementHex — Hetzner has no SEV.
-  // Live hashed unified_server from the Flow D rebuild of e68cca23
-  // (rustls 0.23.45 for RUSTSEC-2026-0285; otherwise as 679fa90e: session
-  // grants retired, issuer key pinned with --credit-issuer-pubkey, access
-  // policy --require-credits --access dpf=best-effort:2, so DPF is free
-  // while pir1 has room and HarmonyPIR hints and OnionPIR are paid).
+  // Live hashed unified_server from the Flow D rebuild of 197511f8
+  // (streaming manifest hash #362, half-hint pricing #364, operator API
+  // keys #365). Access policy --require-credits --access dpf=best-effort:2
+  // --access harmony=best-effort:1:1500000: DPF is free while pir1 has
+  // room, HarmonyPIR hints are free up to 1.5M gas per hour, OnionPIR is
+  // paid.
   binarySha256Hex:
-    'e80334a9ce736a807d44081d25d1ecadbd4c57146c96d55321fb635b19864139',
-  description: 'weikeng1.bitcoinpir.org (Hetzner, no SEV, unified_server with the access policy: DPF best-effort free, HarmonyPIR hints and OnionPIR paid; rustls 0.23.45)',
+    'f472cff57077201a7e95e3375f1f7e9c7ad291946d44e9a6fdd1df1ded393f91',
+  description: 'weikeng1.bitcoinpir.org (Hetzner, no SEV, unified_server 197511f8: DPF best-effort free, HarmonyPIR hints best-effort free up to 1.5M gas/hour, OnionPIR paid; operator API keys)',
 };
 
 /**
