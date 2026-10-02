@@ -801,8 +801,8 @@ export class WasmAttestVerification {
      * (signature-anchored AND content-acceptable).
      *
      * `expectedArkFingerprint`: same as `verifyVcekChain`. Pass the
-     * `AMD_TURIN_ARK_FINGERPRINT` constant from `attest-pin.ts` for
-     * production.
+     * ARK pin from `attest-pin.ts` for the server's CPU generation
+     * (Turin or Milan).
      *
      * `policy` is a `WasmPolicyRequirements` (constructed via its
      * JS-visible constructor + setters). Defaults to the strictest
@@ -2796,11 +2796,39 @@ export class WasmPolicyRequirements {
         wasm.wasmpolicyrequirements_setMaxVmpl(this.__wbg_ptr, v);
     }
     /**
+     * Require every SVN of the report's `reported_tcb` to reach these
+     * values. `fmc` is only for generations that report one (Turin);
+     * pass `undefined` for Milan / Genoa.
+     * @param {number} bootloader
+     * @param {number} tee
+     * @param {number} snp
+     * @param {number} microcode
+     * @param {number | null} [fmc]
+     */
+    setMinTcb(bootloader, tee, snp, microcode, fmc) {
+        wasm.wasmpolicyrequirements_setMinTcb(this.__wbg_ptr, bootloader, tee, snp, microcode, isLikeNone(fmc) ? 0xFFFFFF : fmc);
+    }
+    /**
+     * Require `platform_info.alias_check_complete` (bit 5). Off by default.
+     * @param {boolean} v
+     */
+    setRequireAliasCheckComplete(v) {
+        wasm.wasmpolicyrequirements_setRequireAliasCheckComplete(this.__wbg_ptr, v);
+    }
+    /**
      * Require guests to have `policy.single_socket_required`. Off by default.
      * @param {boolean} v
      */
     setRequireSingleSocket(v) {
         wasm.wasmpolicyrequirements_setRequireSingleSocket(this.__wbg_ptr, v);
+    }
+    /**
+     * Bits that must be set in both the launch and the current
+     * mitigation vector (report version 5+). `0` (default) disables it.
+     * @param {number} bits
+     */
+    setRequiredMitVectorBits(bits) {
+        wasm.wasmpolicyrequirements_setRequiredMitVectorBits(this.__wbg_ptr, bits);
     }
 }
 if (Symbol.dispose) WasmPolicyRequirements.prototype[Symbol.dispose] = WasmPolicyRequirements.prototype.free;
@@ -3601,6 +3629,16 @@ export function mergeDelta(snapshot, delta_raw) {
 }
 
 /**
+ * JS-visible accessor for the Milan ARK fingerprint pinned in
+ * pir-attest-verify (matches `web/src/attest-pin.ts`), for Milan servers.
+ * @returns {Uint8Array}
+ */
+export function milanArkFingerprint() {
+    const ret = wasm.milanArkFingerprint();
+    return ret;
+}
+
+/**
  * Plan multi-round PBC placement. Returns JSON.
  * @param {Uint32Array} item_groups_flat
  * @param {number} items_per
@@ -4327,22 +4365,22 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 657, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 659, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 660, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [NamedExternref("Event")], shim_idx: 657, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 659, function: Function { arguments: [NamedExternref("Event")], shim_idx: 660, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_2);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 657, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 659, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 660, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_3);
             return ret;
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [], shim_idx: 659, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 659, function: Function { arguments: [], shim_idx: 662, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__hc39032372d75848d);
             return ret;
         },

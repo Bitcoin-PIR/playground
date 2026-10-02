@@ -6,7 +6,7 @@ export const BACKENDS: { id: Backend; label: string; tagline: string }[] = [
   { id: 'dpf', label: 'DPF-PIR', tagline: 'two-server, low-latency, batch scans · free when idle' },
   { id: 'harmonypir', label: 'HarmonyPIR', tagline: 'two-server, offline-phase, big batches · free when idle' },
   { id: 'onionpir', label: 'OnionPIR', tagline: 'one-server FHE, single lookups' },
-  { id: 'oram', label: 'ORAM TEE (paused)', tagline: 'one-server AMD SEV-SNP enclave · paused: no TEE host' },
+  { id: 'oram', label: 'ORAM TEE', tagline: 'one-server AMD SEV-SNP enclave · free when idle' },
 ];
 
 export function BackendSelector<B extends Backend = Backend>({

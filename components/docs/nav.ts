@@ -62,7 +62,7 @@ export const DOCS_NAV: DocSection[] = [
   {
     title: 'Operations',
     links: [
-      { slug: 'operations/endpoints', title: 'Live endpoints', summary: 'pir1 (hint) vs pir2 (query, MacBook, no TEE); Direct ORAM paused; WebSocket-only contract.' },
+      { slug: 'operations/endpoints', title: 'Live endpoints', summary: 'pir1 (hint) vs pir2 (query, MacBook, no TEE); Direct ORAM on its own SEV-SNP host; WebSocket-only contract.' },
     ],
   },
   {

@@ -30,7 +30,8 @@ export default function PlaygroundPage() {
           have room: paid lookups go first, and a busy server says so. OnionPIR costs{' '}
           <a href="/docs/sdk/payments" className="underline">credits</a>, and the playground
           has no wallet yet, so it stops at the first paid frame and shows why.{' '}
-          <strong>ORAM TEE</strong> is paused until a new TEE host serves it.
+          <strong>ORAM TEE</strong> runs in an AMD SEV-SNP enclave and is also free while the
+          server has room.
         </p>
       </div>
 

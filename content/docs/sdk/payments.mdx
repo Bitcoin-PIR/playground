@@ -19,11 +19,10 @@ paid and mixed servers, including ones other operators run.
 | --- | --- | --- |
 | `pir1` — `wss://weikeng1.bitcoinpir.org` | DPF server 0, HarmonyPIR hints, OnionPIR | DPF and HarmonyPIR hints **best-effort** (free hint work capped per hour); OnionPIR **paid** |
 | `pir2` — `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` (MacBook, no TEE) | DPF server 1, HarmonyPIR queries | DPF and HarmonyPIR queries **best-effort** |
+| ORAM host — `wss://weikeng2.bitcoinpir.org` (VPSBG, AMD SEV-SNP) | Direct ORAM | Direct ORAM **best-effort** |
 
-So **DPF-PIR and HarmonyPIR are free while the servers have room**;
-OnionPIR needs credits. Direct ORAM (the ORAM TEE backend) is paused: it
-needs a TEE host, and none serves it since the VPSBG pir2 was retired on
-2026-10-02.
+So **DPF-PIR, HarmonyPIR and Direct ORAM (the ORAM TEE backend) are free
+while the servers have room**; OnionPIR needs credits.
 
 A best-effort frame goes out unpaid. When the server's free lane is full,
 or a lane with an hourly budget has used it up, the server answers

@@ -20,7 +20,7 @@ npm install pir-sdk-wasm
 | --- | --- |
 | `WasmDpfClient` | Two-server DPF client. The default. |
 | `WasmHarmonyClient` | Two-server HarmonyPIR client with offline hint phase. |
-| `WasmOramClient` | One-server Direct ORAM client (AMD SEV-SNP). Paused since 2026-10-02: no TEE host serves it; see [Live endpoints](/docs/operations/endpoints). |
+| `WasmOramClient` | One-server Direct ORAM client (AMD SEV-SNP host `wss://weikeng2.bitcoinpir.org`; see [Live endpoints](/docs/operations/endpoints)). |
 | `WasmArcCredentialRequest`, `WasmArcCredential` | Credits: the blinded ARC credential request and the credential it finalizes into. |
 | `WasmQueryResult` | Per-script-hash result (UTXOs, balance, Merkle status). |
 | `WasmSyncResult` | A whole sync's worth of results, plus synced height. |

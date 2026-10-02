@@ -11,8 +11,9 @@ import { runQuery, type PlaygroundQueryResult } from '@/lib/playground-clients';
 import { ORAM_PAUSED_MESSAGE, ORAM_PROVIDER } from '@vendor/web/production-providers';
 
 export function QueryRunner() {
-  // DPF-PIR and HarmonyPIR are free while the servers have room; OnionPIR needs
-  // credits (see /docs/sdk/payments). Direct ORAM is paused: no TEE host.
+  // DPF-PIR, HarmonyPIR and Direct ORAM are free while the servers have room;
+  // OnionPIR needs credits (see /docs/sdk/payments). The ORAM notice below only
+  // shows if ORAM_PROVIDER is null (no TEE host).
   const [backend, setBackend] = useState<Backend>('dpf');
   const [address, setAddress] = useState('');
   const [running, setRunning] = useState(false);
