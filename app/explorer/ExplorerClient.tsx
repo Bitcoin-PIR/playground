@@ -134,8 +134,8 @@ export function ExplorerClient() {
           every metered frame, and credits can only be presented inside the sealed channel.
           The explorer keeps the wire in cleartext so the frames stay readable, so a run
           stops at pir1&apos;s first metered frame (&ldquo;insufficient gas&rdquo;); the
-          frames captured up to that point are still shown and checked. Paid queries and
-          the free ORAM TEE backend run in the <a href="/playground" className="underline">playground</a>.
+          frames captured up to that point are still shown and checked. Paid queries run in
+          the <a href="/playground" className="underline">playground</a>.
         </p>
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <label className="block flex-1 min-w-[260px]">

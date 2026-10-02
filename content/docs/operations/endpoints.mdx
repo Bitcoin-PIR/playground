@@ -9,18 +9,26 @@ the [SDK](/docs/sdk/typescript) handles the routing.
 | Endpoint                          | Short name | Role            | Hardware              | SEV-SNP | Credits |
 | --------------------------------- | ---------- | --------------- | --------------------- | ------- | ------- |
 | `wss://weikeng1.bitcoinpir.org`   | pir1       | **Hint server** (+ DPF server 0, OnionPIR) | Hetzner i7-8700 | No | DPF free while it has room; HarmonyPIR hints and OnionPIR paid |
-| `wss://weikeng2.bitcoinpir.org`   | pir2       | **Query server** (+ DPF server 1, Direct ORAM) | VPSBG (Tier 3 UKI) | Yes | DPF and Direct ORAM free while it has room; HarmonyPIR queries paid |
+| `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` | pir2 | **Query server** (+ DPF server 1) | MacBook (macOS arm64) | No | DPF free while it has room; HarmonyPIR queries paid |
 
 Each server publishes what it charges per backend
-([Payments](/docs/sdk/payments)): DPF-PIR and Direct ORAM are free while
-the servers have room, while HarmonyPIR (hints on pir1, queries on pir2)
-and OnionPIR need a credit provider.
+([Payments](/docs/sdk/payments)): DPF-PIR is free while the servers have
+room, while HarmonyPIR (hints on pir1, queries on pir2) and OnionPIR need
+a credit provider.
 
-This split is intentional. The query server — the one that sees the
-per-query traffic — runs on attested hardware with the strongest
-binding (see [Attestation](/docs/privacy/attestation)). The hint
-server runs on commodity hardware because the hint blob alone reveals
-nothing about which addresses are queried.
+<Callout kind="warn" title="pir2 has no TEE; Direct ORAM is paused">
+Until 2026-10-02 pir2 was a VPSBG AMD SEV-SNP host (Tier 3 UKI) at
+`wss://weikeng2.bitcoinpir.org`, which also served Direct ORAM. That host
+was retired and the endpoint is down. A MacBook without a TEE now serves
+the pir2 roles under the server id `pir2-macbook-v1`. Direct ORAM needs a
+TEE, so it is paused until a new VPSBG TEE host exists.
+</Callout>
+
+The hint/query split is intentional. The hint server runs on commodity
+hardware because the hint blob alone reveals nothing about which
+addresses are queried. Neither live server has hardware attestation
+today: each is checked by its binary pin plus its operator-signed
+identity (see [Attestation](/docs/privacy/attestation)).
 
 ```text
                   ┌───────────────────────────┐
@@ -40,12 +48,12 @@ nothing about which addresses are queried.
                                 │  traffic
                                 │
                   ┌─────────────▼─────────────┐
-                  │ pir2 (VPSBG, SEV-SNP)     │
+                  │ pir2 (MacBook, no TEE)    │
                   │   - DPF server 1          │
                   │   - HarmonyPIR query srv  │
-                  │   - Direct ORAM (TEE)     │
                   │   (no OnionPIR — runs     │
-                  │    on pir1 only)          │
+                  │    on pir1 only; Direct   │
+                  │    ORAM paused)           │
                   └───────────────────────────┘
 ```
 
@@ -76,8 +84,8 @@ Connect to **both** servers. Server 0 = pir1, server 1 = pir2.
 
 ```ts
 new WasmDpfClient(
-  'wss://weikeng1.bitcoinpir.org',   // server 0 (Hetzner)
-  'wss://weikeng2.bitcoinpir.org',   // server 1 (VPSBG, SEV)
+  'wss://weikeng1.bitcoinpir.org',                      // server 0 (Hetzner)
+  'wss://bitcoin-pir-weikeng-laptop.chenweikeng.com',   // server 1 (MacBook)
 );
 ```
 
@@ -91,8 +99,8 @@ Connect to both, but the role is asymmetric:
 
 ```ts
 new WasmHarmonyClient(
-  'wss://weikeng1.bitcoinpir.org',   // hint server
-  'wss://weikeng2.bitcoinpir.org',   // query server
+  'wss://weikeng1.bitcoinpir.org',                      // hint server
+  'wss://bitcoin-pir-weikeng-laptop.chenweikeng.com',   // query server
 );
 ```
 
@@ -107,18 +115,25 @@ runs `--serve-queries` only and does not serve OnionPIR. Check
 [attest-pin.ts](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/attest-pin.ts)
 for the canonical config.
 
-### Direct ORAM
+### Direct ORAM (paused)
 
-Direct ORAM is single-server too and runs only on `pir2`, inside the
-SEV-SNP guest: the server process sees the script hash, the host does
-not. Use the strict client with the production request shape — every
-lookup is one fixed-budget ORAM access with 25 padded slots:
+Direct ORAM is single-server too and runs inside an SEV-SNP guest: the
+server process sees the script hash, the host does not. It ran on the
+VPSBG `pir2` until that host was retired on 2026-10-02, and it is
+**paused** until a new VPSBG TEE host exists: `ORAM_PROVIDER` is `null`
+and clients stop with `ORAM_PAUSED_MESSAGE`. Once a host is back, use the
+strict client with the production request shape — every lookup is one
+fixed-budget ORAM access with 25 padded slots:
 
 ```ts
-import { OramPirClientAdapter, PIR2_PROVIDER, PRODUCTION_ORAM_BATCH_PLANNER } from 'bitcoin-pir-web';
+import {
+  OramPirClientAdapter, ORAM_PROVIDER, ORAM_PAUSED_MESSAGE, PRODUCTION_ORAM_BATCH_PLANNER,
+} from 'bitcoin-pir-web';
+
+if (!ORAM_PROVIDER) throw new Error(ORAM_PAUSED_MESSAGE);  // paused today
 
 new OramPirClientAdapter({
-  serverUrl: PIR2_PROVIDER.endpoint,        // wss://weikeng2.bitcoinpir.org
+  serverUrl: ORAM_PROVIDER.endpoint,
   strictVerification: true,                 // attestation + identity + DB proof, fail closed
   batchPlanner: PRODUCTION_ORAM_BATCH_PLANNER,
   // …pins: see the playground's ORAM snippet
@@ -188,7 +203,7 @@ If you're deploying the reference servers yourself, see:
 ## Where to go next
 
 - [Attestation](/docs/privacy/attestation) — pinning the running
-  binary on `pir2`.
+  binary and checking the operator-signed identity of each server.
 - [Wire format](/docs/protocol/wire-format) — the WebSocket frame
   layout both endpoints speak.
 - [Troubleshooting](/docs/troubleshooting) — connection issues.

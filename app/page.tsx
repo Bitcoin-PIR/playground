@@ -39,8 +39,8 @@ export default function Home() {
           </li>
           <li>
             <span className="text-zinc-500">query:</span>{' '}
-            <code>wss://weikeng2.bitcoinpir.org</code>{' '}
-            <span className="text-zinc-500">(VPSBG, SEV-SNP Tier 3)</span>
+            <code>wss://bitcoin-pir-weikeng-laptop.chenweikeng.com</code>{' '}
+            <span className="text-zinc-500">(MacBook, no TEE)</span>
           </li>
         </ul>
       </div>

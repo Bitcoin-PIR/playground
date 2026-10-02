@@ -25,6 +25,12 @@ declare module 'pir-sdk-wasm' {
     verifyVcekChain(expectedArkFingerprint: Uint8Array): void;
     free(): void;
   }
+  /** Operator-signed identity bundle (REQ_ANNOUNCE); check it with gateOperatorIdentity. */
+  export interface WasmAnnounceVerification {
+    readonly serverId: string;
+    readonly binarySha256Hex: string;
+    free(): void;
+  }
   export class WasmQueryResult {
     readonly entryCount: number;
     readonly totalBalance: bigint;
@@ -42,6 +48,7 @@ declare module 'pir-sdk-wasm' {
     connect(): Promise<void>;
     attest(serverIndex: number): Promise<WasmAttestVerification>;
     upgradeToSecureChannel(pub0: Uint8Array, pub1: Uint8Array): Promise<void>;
+    announce(serverIndex: number): Promise<WasmAnnounceVerification>;
     /** After the sealed channel: 'not-enabled' | 'not-required' | 'required' | 'best-effort'. */
     enableCredits(serverIndex: number, provider: CreditProvider): Promise<string>;
     fetchCatalog(): Promise<any>;
@@ -56,6 +63,7 @@ declare module 'pir-sdk-wasm' {
     connect(): Promise<void>;
     attest(serverIndex: number): Promise<WasmAttestVerification>;
     upgradeToSecureChannel(hintPub: Uint8Array, queryPub: Uint8Array): Promise<void>;
+    announce(serverIndex: number): Promise<WasmAnnounceVerification>;
     enableCredits(serverIndex: number, provider: CreditProvider): Promise<string>;
     fetchCatalog(): Promise<any>;
     fetchHintsWithProgress(catalog: any, dbId: number, progress: (p: any) => void): Promise<void>;
@@ -92,8 +100,25 @@ declare module 'bitcoin-pir-web' {
   }
   export const PIR1_PROVIDER: ProductionProviderPin;
   export const PIR2_PROVIDER: ProductionProviderPin;
+  /** Direct ORAM host; null while paused (no TEE host since 2026-10-02). */
+  export const ORAM_PROVIDER: ProductionProviderPin | null;
+  export const ORAM_PAUSED_MESSAGE: string;
   /** The production Direct ORAM request shape (25 padded slots). */
   export const PRODUCTION_ORAM_BATCH_PLANNER: Readonly<Record<string, number>>;
+  export interface OperatorIdentity {
+    state: 'not-checked' | 'unconfigured' | 'verified' | 'unverified' | 'error';
+    serverId?: string;
+    binarySha256Hex?: string;
+    error?: string;
+  }
+  /** Pin the operator key, bind the announce to the attested channel key, check freshness. */
+  export function gateOperatorIdentity(
+    v: import('pir-sdk-wasm').WasmAnnounceVerification,
+    pinnedOperatorPubkey: Uint8Array,
+    expectedChannelPub: Uint8Array,
+    nowUnixSeconds: bigint,
+    maxAgeSeconds?: bigint,
+  ): OperatorIdentity;
   export const PRODUCTION_ISSUER_URL: string;
   export interface CreditEnablement { state: 'not-enabled' | 'not-required' | 'required' | 'best-effort' | 'error'; error?: string; }
   export class OramPirClientAdapter {
@@ -145,6 +170,9 @@ declare module 'bitcoin-pir-web/attest-pin' {
   }
   export const AMD_TURIN_ARK_FINGERPRINT: Uint8Array;
   export const PIR1_PIN: ServerAttestPin;
+  /** The pir2 slot since 2026-10-02 (MacBook, no TEE): binary pin only. */
+  export const PIR2_MACBOOK_PIN: ServerAttestPin;
+  /** Historical: the retired VPSBG SEV-SNP pir2. */
   export const PIR2_TIER3_PIN: ServerAttestPin;
   export const PRODUCTION_ORAM_DB_PROOF_V2_PINS: unknown[];
 }

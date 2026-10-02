@@ -18,10 +18,12 @@ paid and mixed servers, including ones other operators run.
 | Server | Serves | Access |
 | --- | --- | --- |
 | `pir1` — `wss://weikeng1.bitcoinpir.org` | DPF server 0, HarmonyPIR hints, OnionPIR | DPF **best-effort**; HarmonyPIR hints and OnionPIR **paid** |
-| `pir2` — `wss://weikeng2.bitcoinpir.org` | DPF server 1, HarmonyPIR queries, Direct ORAM | DPF and Direct ORAM **best-effort**; HarmonyPIR queries **paid** |
+| `pir2` — `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` (MacBook, no TEE) | DPF server 1, HarmonyPIR queries | DPF **best-effort**; HarmonyPIR queries **paid** |
 
-So **DPF-PIR and Direct ORAM (the ORAM TEE backend) are free while the
-servers have room**; HarmonyPIR and OnionPIR need credits.
+So **DPF-PIR is free while the servers have room**; HarmonyPIR and
+OnionPIR need credits. Direct ORAM (the ORAM TEE backend) is paused: it
+needs a TEE host, and none serves it since the VPSBG pir2 was retired on
+2026-10-02.
 
 A best-effort frame goes out unpaid. When the server's free lane is full
 it answers `free capacity busy: …`; the SDK then pays for the frame and
@@ -31,9 +33,8 @@ on the server's load and the connection's balance, never on what is
 looked up.
 
 <Callout kind="note" title="Try it without paying">
-The [playground](/playground) runs DPF-PIR and the ORAM TEE backend for
-free. For HarmonyPIR and OnionPIR it shows exactly where a lookup stops
-without credits.
+The [playground](/playground) runs DPF-PIR for free. For HarmonyPIR and
+OnionPIR it shows exactly where a lookup stops without credits.
 </Callout>
 
 ## Price

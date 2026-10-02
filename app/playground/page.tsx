@@ -18,17 +18,19 @@ export default function PlaygroundPage() {
           to{' '}
           <code className="font-mono text-xs">wss://weikeng1.bitcoinpir.org</code>{' '}
           /{' '}
-          <code className="font-mono text-xs">wss://weikeng2.bitcoinpir.org</code>,
-          attest the server binaries, run the query, and verify the result (per-bucket
-          Merkle proofs, or for Direct ORAM the attested runtime&apos;s database proof).
-          The right panel is the equivalent TypeScript your wallet would write — editable
-          and runnable right here, transpiled and executed entirely in your browser.
+          <code className="font-mono text-xs">wss://bitcoin-pir-weikeng-laptop.chenweikeng.com</code>,
+          attest the server binaries, check each operator-signed identity, run the query,
+          and verify the result with per-bucket Merkle proofs. Neither server has a TEE:
+          pir2 now runs on a MacBook. The right panel is the equivalent TypeScript your
+          wallet would write — editable and runnable right here, transpiled and executed
+          entirely in your browser.
         </p>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-          <strong>DPF-PIR</strong> and <strong>ORAM TEE</strong> are free while the servers
-          have room: paid lookups go first, and a busy server says so. HarmonyPIR and OnionPIR
-          cost <a href="/docs/sdk/payments" className="underline">credits</a>, and the
-          playground has no wallet yet, so those stop at the first paid frame and show why.
+          <strong>DPF-PIR</strong> is free while the servers have room: paid lookups go first,
+          and a busy server says so. HarmonyPIR and OnionPIR cost{' '}
+          <a href="/docs/sdk/payments" className="underline">credits</a>, and the playground
+          has no wallet yet, so those stop at the first paid frame and show why.{' '}
+          <strong>ORAM TEE</strong> is paused until a new TEE host serves it.
         </p>
       </div>
 

@@ -8,9 +8,10 @@
  * imports to the same live SDK the structured path uses).
  *
  * Payments: each snippet wires a credit provider (docs: /docs/sdk/payments).
- * The one shown is an empty wallet: DPF and Direct ORAM run free while the
- * servers have room, and a backend a server charges for (HarmonyPIR and
- * OnionPIR) stops the query with "credits required".
+ * The one shown is an empty wallet: DPF runs free while the servers have
+ * room, and a backend a server charges for (HarmonyPIR and OnionPIR) stops
+ * the query with "credits required". Direct ORAM is paused (no TEE host):
+ * its snippet stops at the ORAM_PROVIDER guard.
  */
 
 import type { Backend } from '@/components/BackendSelector';
@@ -35,43 +36,60 @@ const EMPTY_WALLET = `// Payments (/docs/sdk/payments): each server says per bac
 // CreditWallet.present from 'bitcoin-pir-web' to pay.
 const creditProvider = (credits: number) => null;`;
 
+// Neither live server has a TEE (both attest as 'noSevHost'), so nothing
+// hardware-signs their channel keys. Mirrors the structured path
+// (`noTeeLegFailures` in lib/playground-clients.ts). Indented for the
+// `try` block it is pasted into.
+const REQUIRE_OPERATOR_IDENTITY = `// No TEE on either server: the operator-signed identity (REQ_ANNOUNCE)
+  // is what ties each channel key to the operator. Require it, for the
+  // pinned server id and binary, before any credits or query frame.
+  const now = BigInt(Math.floor(Date.now() / 1000));
+  for (const [i, p, att] of [[0, PIR1_PROVIDER, att0], [1, PIR2_PROVIDER, att1]] as const) {
+    const v = await client.announce(i);
+    const id = gateOperatorIdentity(v, p.operatorPubkey, att.serverStaticPub, now);
+    v.free();
+    if (id.state !== 'verified' || id.serverId !== p.stableServerId
+        || id.binarySha256Hex !== p.serverPin.binarySha256Hex) {
+      throw new Error(\`server \${i} operator identity: \${id.state} \${id.error ?? ''}\`);
+    }
+  }`;
+
 const DPF_SNIPPET = `// DPF-PIR — two servers, low-latency, batch scans. Free while the
-// servers have room: pir1 serves DPF on a best-effort free lane (paid
-// lookups go first; with the empty wallet below, a busy pir1 answers
+// servers have room: both serve DPF on a best-effort free lane (paid
+// lookups go first; with the empty wallet below, a busy server answers
 // "free capacity busy").
 
 import init, { WasmDpfClient } from 'pir-sdk-wasm';
-import { addressToScriptPubKey, scriptHash, hexToBytes }
-  from 'bitcoin-pir-web';
-import { AMD_TURIN_ARK_FINGERPRINT, PIR1_PIN, PIR2_TIER3_PIN }
-  from 'bitcoin-pir-web/attest-pin';
+import {
+  addressToScriptPubKey, scriptHash, hexToBytes,
+  gateOperatorIdentity, PIR1_PROVIDER, PIR2_PROVIDER,
+} from 'bitcoin-pir-web';
 
 await init();
 
 ${EMPTY_WALLET}
 
 const client = new WasmDpfClient(
-  'wss://weikeng1.bitcoinpir.org',
-  'wss://weikeng2.bitcoinpir.org',
+  PIR1_PROVIDER.endpoint,  // wss://weikeng1.bitcoinpir.org
+  PIR2_PROVIDER.endpoint,  // wss://bitcoin-pir-weikeng-laptop.chenweikeng.com
 );
 try {
   await client.connect();
 
-  // Pinned attestation (proves each server runs the binary the operator
-  // built) — required before sending any query.
+  // Pinned attestation (each server reports the binary it runs) —
+  // required before sending any query. With no TEE the pin catches
+  // drift from the operator-published build but is not hardware-backed.
   const att0 = await client.attest(0);
   const att1 = await client.attest(1);
-  if (att0.binarySha256Hex !== PIR1_PIN.binarySha256Hex) {
+  if (att0.binarySha256Hex !== PIR1_PROVIDER.serverPin.binarySha256Hex) {
     throw new Error('pir1 binary pin mismatch');
   }
-  if (att1.binarySha256Hex !== PIR2_TIER3_PIN.binarySha256Hex) {
+  if (att1.binarySha256Hex !== PIR2_PROVIDER.serverPin.binarySha256Hex) {
     throw new Error('pir2 binary pin mismatch');
   }
-  if (att1.launchMeasurementHex !== PIR2_TIER3_PIN.measurementHex) {
-    throw new Error('pir2 SEV-SNP MEASUREMENT pin mismatch');
-  }
-  att1.verifyVcekChain(AMD_TURIN_ARK_FINGERPRINT);  // AMD chain
   await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);
+
+  ${REQUIRE_OPERATOR_IDENTITY}
 
   // After the sealed channel (presentations are bearer material).
   // 'best-effort' = free while the server has room.
@@ -107,33 +125,34 @@ const HARMONY_SNIPPET = `// HarmonyPIR — two servers + offline hint phase, opt
 // stops at the hint download).
 
 import init, { WasmHarmonyClient } from 'pir-sdk-wasm';
-import { addressToScriptPubKey, scriptHash, hexToBytes }
-  from 'bitcoin-pir-web';
-import { AMD_TURIN_ARK_FINGERPRINT, PIR1_PIN, PIR2_TIER3_PIN }
-  from 'bitcoin-pir-web/attest-pin';
+import {
+  addressToScriptPubKey, scriptHash, hexToBytes,
+  gateOperatorIdentity, PIR1_PROVIDER, PIR2_PROVIDER,
+} from 'bitcoin-pir-web';
 
 await init();
 
 ${EMPTY_WALLET}
 
 const client = new WasmHarmonyClient(
-  'wss://weikeng1.bitcoinpir.org',  // hint
-  'wss://weikeng2.bitcoinpir.org',  // query
+  PIR1_PROVIDER.endpoint,  // hint: wss://weikeng1.bitcoinpir.org
+  PIR2_PROVIDER.endpoint,  // query: wss://bitcoin-pir-weikeng-laptop.chenweikeng.com
 );
 try {
   await client.connect();
 
-  // Same attest + pin + channel upgrade as DPF.
+  // Same attest + pin + channel upgrade + identity check as DPF.
   const att0 = await client.attest(0);
   const att1 = await client.attest(1);
-  if (att0.binarySha256Hex !== PIR1_PIN.binarySha256Hex) {
+  if (att0.binarySha256Hex !== PIR1_PROVIDER.serverPin.binarySha256Hex) {
     throw new Error('pir1 binary pin mismatch');
   }
-  if (att1.launchMeasurementHex !== PIR2_TIER3_PIN.measurementHex) {
-    throw new Error('pir2 SEV-SNP MEASUREMENT pin mismatch');
+  if (att1.binarySha256Hex !== PIR2_PROVIDER.serverPin.binarySha256Hex) {
+    throw new Error('pir2 binary pin mismatch');
   }
-  att1.verifyVcekChain(AMD_TURIN_ARK_FINGERPRINT);
   await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);
+
+  ${REQUIRE_OPERATOR_IDENTITY}
 
   console.log('credits hint:', await client.enableCredits(0, creditProvider));
   console.log('credits query:', await client.enableCredits(1, creditProvider));
@@ -214,32 +233,35 @@ try {
 }
 `;
 
-const ORAM_SNIPPET = `// Direct ORAM — one server inside an AMD SEV-SNP guest (pir2). The
-// server process sees the script hash, the host does not; every lookup
-// is one fixed-budget ORAM request (25 padded slots). Free while pir2
-// has room.
+const ORAM_SNIPPET = `// Direct ORAM — one server inside an AMD SEV-SNP guest. The server
+// process sees the script hash, the host does not; every lookup is one
+// fixed-budget ORAM request (25 padded slots). PAUSED: it needs a TEE
+// host, and none serves it since the VPSBG pir2 was retired on
+// 2026-10-02, so ORAM_PROVIDER is null and this stops at the guard.
 
 import {
   OramPirClientAdapter,
-  PIR2_PROVIDER,
+  ORAM_PROVIDER, ORAM_PAUSED_MESSAGE,
   PRODUCTION_ORAM_BATCH_PLANNER,
   addressToScriptPubKey, scriptHash, hexToBytes,
 } from 'bitcoin-pir-web';
-import { AMD_TURIN_ARK_FINGERPRINT, PRODUCTION_ORAM_DB_PROOF_V2_PINS }
+import { PRODUCTION_ORAM_DB_PROOF_V2_PINS }
   from 'bitcoin-pir-web/attest-pin';
 
 ${EMPTY_WALLET}
 
+if (!ORAM_PROVIDER) throw new Error(ORAM_PAUSED_MESSAGE);
+
 const client = new OramPirClientAdapter({
-  serverUrl: PIR2_PROVIDER.endpoint,
+  serverUrl: ORAM_PROVIDER.endpoint,
   // Fail closed: AMD chain + pinned binary/MEASUREMENT, the operator-
-  // signed identity of pir2, and a database proof checked here must all
-  // pass before any lookup.
+  // signed identity of the ORAM host, and a database proof checked here
+  // must all pass before any lookup.
   strictVerification: true,
-  expectedArkFingerprint: AMD_TURIN_ARK_FINGERPRINT,
-  expectedServerPin: PIR2_PROVIDER.serverPin,
-  expectedServerId: PIR2_PROVIDER.stableServerId,
-  pinnedOperatorPubkey: PIR2_PROVIDER.operatorPubkey,
+  expectedArkFingerprint: ORAM_PROVIDER.expectedArkFingerprint,
+  expectedServerPin: ORAM_PROVIDER.serverPin,
+  expectedServerId: ORAM_PROVIDER.stableServerId,
+  pinnedOperatorPubkey: ORAM_PROVIDER.operatorPubkey,
   verifyOperatorIdentity: true,
   databaseProofPins: PRODUCTION_ORAM_DB_PROOF_V2_PINS,
   // The production request shape — never choose your own.
