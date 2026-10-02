@@ -178,6 +178,12 @@ Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
 
+## Recent history (2026-10-02) — transition pins + operator API key re-vendor
+
+Re-vendored BitcoinPIR `4c02540c`: #372 transition binary pins (`ServerAttestPin.transitionBinarySha256Hex`, `pinAcceptsBinary`) and #373 operator API keys (`apiKey` on the adapters and the OnionPIR client, `CreditEnablement` state `'api-key'`, opcode `0x13`, wasm `presentApiKey`). No pin values changed. The wasm was rebuilt with the r10 recipe below, which first reproduced the `5cc9fb90` vendor byte for byte.
+- **Playground code**: every binary-pin comparison outside `vendor/` uses `pinAcceptsBinary` (the attestation pin check and `noTeeLegFailures` in `lib/playground-clients.ts`, the DPF/HarmonyPIR snippets, the attestation and quickstart doc samples; the Monaco ambient types declare it), and `ResultPanel` labels `'api-key'`. Still no API key UI.
+- **Verified live** from a local dev build: DPF and HarmonyPIR both return 2 UTXOs / 1,284 sat for `1Q2TWHE3…` without credits, both servers pin-matched and operator-endorsed at git `197511f8`, credits best-effort on both; the DPF snippet runs verbatim.
+
 ## Recent history (2026-10-02) — r10 pins re-vendor, HarmonyPIR free while the servers have room
 
 Re-vendored BitcoinPIR `5cc9fb90`: `PIR1_PIN` / `PIR2_MACBOOK_PIN` for the `197511f8` rebuild both servers run, HarmonyPIR half-hint pricing (#364) in `credits.ts`, and a **rebuilt wasm** (`crates/sdk/client` + `crates/trust/pir-credit` changed; #365's `present_api_key` is not exported to JS, so `.js` / `.d.ts` stayed byte-identical).

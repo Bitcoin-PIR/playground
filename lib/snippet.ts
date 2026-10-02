@@ -49,7 +49,7 @@ const REQUIRE_OPERATOR_IDENTITY = `// No TEE on either server: the operator-sign
     const id = gateOperatorIdentity(v, p.operatorPubkey, att.serverStaticPub, now);
     v.free();
     if (id.state !== 'verified' || id.serverId !== p.stableServerId
-        || id.binarySha256Hex !== p.serverPin.binarySha256Hex) {
+        || !pinAcceptsBinary(p.serverPin, id.binarySha256Hex ?? '')) {
       throw new Error(\`server \${i} operator identity: \${id.state} \${id.error ?? ''}\`);
     }
   }`;
@@ -64,6 +64,7 @@ import {
   addressToScriptPubKey, scriptHash, hexToBytes,
   gateOperatorIdentity, PIR1_PROVIDER, PIR2_PROVIDER,
 } from 'bitcoin-pir-web';
+import { pinAcceptsBinary } from 'bitcoin-pir-web/attest-pin';
 
 await init();
 
@@ -79,12 +80,14 @@ try {
   // Pinned attestation (each server reports the binary it runs) —
   // required before sending any query. With no TEE the pin catches
   // drift from the operator-published build but is not hardware-backed.
+  // pinAcceptsBinary: the pinned build, or the pin's transition build
+  // while the operator switches a node to a new build.
   const att0 = await client.attest(0);
   const att1 = await client.attest(1);
-  if (att0.binarySha256Hex !== PIR1_PROVIDER.serverPin.binarySha256Hex) {
+  if (!pinAcceptsBinary(PIR1_PROVIDER.serverPin, att0.binarySha256Hex)) {
     throw new Error('pir1 binary pin mismatch');
   }
-  if (att1.binarySha256Hex !== PIR2_PROVIDER.serverPin.binarySha256Hex) {
+  if (!pinAcceptsBinary(PIR2_PROVIDER.serverPin, att1.binarySha256Hex)) {
     throw new Error('pir2 binary pin mismatch');
   }
   await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);
@@ -130,6 +133,7 @@ import {
   addressToScriptPubKey, scriptHash, hexToBytes,
   gateOperatorIdentity, PIR1_PROVIDER, PIR2_PROVIDER,
 } from 'bitcoin-pir-web';
+import { pinAcceptsBinary } from 'bitcoin-pir-web/attest-pin';
 
 await init();
 
@@ -145,10 +149,10 @@ try {
   // Same attest + pin + channel upgrade + identity check as DPF.
   const att0 = await client.attest(0);
   const att1 = await client.attest(1);
-  if (att0.binarySha256Hex !== PIR1_PROVIDER.serverPin.binarySha256Hex) {
+  if (!pinAcceptsBinary(PIR1_PROVIDER.serverPin, att0.binarySha256Hex)) {
     throw new Error('pir1 binary pin mismatch');
   }
-  if (att1.binarySha256Hex !== PIR2_PROVIDER.serverPin.binarySha256Hex) {
+  if (!pinAcceptsBinary(PIR2_PROVIDER.serverPin, att1.binarySha256Hex)) {
     throw new Error('pir2 binary pin mismatch');
   }
   await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);

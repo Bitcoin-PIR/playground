@@ -69,6 +69,7 @@ import {
   PIR1_PROVIDER,  // pir1: endpoint, PIR1_PIN, server id, operator key
   PIR2_PROVIDER,  // pir2: endpoint, PIR2_MACBOOK_PIN, server id, operator key
 } from 'bitcoin-pir-web';
+import { pinAcceptsBinary } from 'bitcoin-pir-web/attest-pin';
 
 const attest0 = await client.attest(0);  // hint server
 const attest1 = await client.attest(1);  // query server
@@ -76,10 +77,10 @@ const attest1 = await client.attest(1);  // query server
 // --- Step 1: pin the operator's published binaries. Both servers
 // report `noSevHost`: the hash is self-reported, so it catches drift
 // from the published build but no hardware vouches for it. ---
-if (attest0.binarySha256Hex !== PIR1_PROVIDER.serverPin.binarySha256Hex) {
+if (!pinAcceptsBinary(PIR1_PROVIDER.serverPin, attest0.binarySha256Hex)) {
   throw new Error('Hint server binary hash drift');
 }
-if (attest1.binarySha256Hex !== PIR2_PROVIDER.serverPin.binarySha256Hex) {
+if (!pinAcceptsBinary(PIR2_PROVIDER.serverPin, attest1.binarySha256Hex)) {
   throw new Error('Query server binary hash drift');
 }
 
@@ -97,7 +98,7 @@ for (const [i, p, att] of [[0, PIR1_PROVIDER, attest0], [1, PIR2_PROVIDER, attes
   const id = gateOperatorIdentity(v, p.operatorPubkey, att.serverStaticPub, now);
   v.free();
   if (id.state !== 'verified' || id.serverId !== p.stableServerId
-      || id.binarySha256Hex !== p.serverPin.binarySha256Hex) {
+      || !pinAcceptsBinary(p.serverPin, id.binarySha256Hex ?? '')) {
     throw new Error(`server ${i}: operator identity ${id.state}`);
   }
 }
@@ -169,7 +170,11 @@ of MEASUREMENT). For Slice 2, the binary hash is server-self-reported
 and the operator publishes it via a separate channel.
 
 The `binarySha256Hex` is also pinnable independently — the only pin
-for a host without SEV (both live servers today).
+for a host without SEV (both live servers today). While the operator
+switches such a host to a new build, its pin also carries the running
+build as `transitionBinarySha256Hex`; compare with
+`pinAcceptsBinary(pin, reported)`, which accepts either, rather than
+with `===`.
 
 ### `sevStatus`
 

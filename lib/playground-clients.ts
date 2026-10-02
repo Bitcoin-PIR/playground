@@ -29,6 +29,7 @@ import {
   AMD_TURIN_ARK_FINGERPRINT,
   PIR1_PIN,
   PRODUCTION_ORAM_DB_PROOF_V2_PINS,
+  pinAcceptsBinary,
   type ServerAttestPin,
 } from '@vendor/web/attest-pin';
 import {
@@ -89,7 +90,9 @@ export interface OperatorIdentitySummary {
  * Credits (paid queries) on one server, for this backend: `required` means
  * its metered frames are paid from the credit provider, `best-effort` that
  * they are free while the server has room (paid only when it is busy and the
- * provider has credits), `not-enabled` / `not-required` that it is free.
+ * provider has credits), `not-enabled` / `not-required` that it is free,
+ * `api-key` that an operator API key made the connection unmetered (the
+ * playground never sets one).
  */
 export interface CreditsSummary {
   label: string;
@@ -231,11 +234,12 @@ async function attestAndUpgrade(
       const allZero = v.serverStaticPub.every((b) => b === 0);
 
       // Pin check (always done — even non-SEV hosts have binarySha256Hex pinnable).
+      // pinAcceptsBinary also accepts the pin's transition build, if set.
       let pinError: string | null = null;
       if (
         s.pin.binarySha256Hex &&
         v.binarySha256Hex &&
-        s.pin.binarySha256Hex.toLowerCase() !== v.binarySha256Hex.toLowerCase()
+        !pinAcceptsBinary(s.pin, v.binarySha256Hex)
       ) {
         pinError = `binary_sha256 mismatch (expected ${s.pin.binarySha256Hex.slice(0, 12)}…, got ${v.binarySha256Hex.slice(0, 12)}…)`;
       } else if (
@@ -381,7 +385,8 @@ async function verifyOperatorIdentityOne(
  * operator-signed identity is what ties that key to the operator. As in the
  * upstream strict mode (`collectStrictServerLegFailures`), such a leg needs a
  * verified identity for its pinned server id (checked in
- * verifyOperatorIdentityOne) whose signed binary hash matches the binary pin.
+ * verifyOperatorIdentityOne) whose signed binary hash the binary pin accepts
+ * (`pinAcceptsBinary`: the pinned build, or its transition build while set).
  * Returns why the session must not query; empty when it may.
  */
 function noTeeLegFailures(
@@ -393,14 +398,13 @@ function noTeeLegFailures(
   servers.forEach((s, i) => {
     if (attestation[i]?.state !== 'unsupported') return; // SEV-attested leg
     const id = operatorIdentity[i]?.identity;
-    const pinned = s.pin.binarySha256Hex?.toLowerCase();
-    if (!pinned) {
+    if (!s.pin.binarySha256Hex) {
       failures.push(`${s.label}: no TEE and no binary pin`);
     } else if (id?.state !== 'verified') {
       failures.push(
         `${s.label}: no TEE, and its operator-signed identity is ${id?.state ?? 'missing'}${id?.error ? ` (${id.error})` : ''}`,
       );
-    } else if (id.binarySha256Hex?.toLowerCase() !== pinned) {
+    } else if (!pinAcceptsBinary(s.pin, id.binarySha256Hex ?? '')) {
       failures.push(`${s.label}: the operator-signed binary hash does not match the binary pin`);
     }
   });

@@ -94,7 +94,7 @@ declare module 'bitcoin-pir-web' {
   export interface ProductionProviderPin {
     endpoint: string;
     stableServerId: string;
-    serverPin: { binarySha256Hex?: string; measurementHex?: string };
+    serverPin: { binarySha256Hex?: string; transitionBinarySha256Hex?: string; measurementHex?: string };
     operatorPubkey: Uint8Array;
     expectedArkFingerprint: Uint8Array | null;
   }
@@ -120,7 +120,7 @@ declare module 'bitcoin-pir-web' {
     maxAgeSeconds?: bigint,
   ): OperatorIdentity;
   export const PRODUCTION_ISSUER_URL: string;
-  export interface CreditEnablement { state: 'not-enabled' | 'not-required' | 'required' | 'best-effort' | 'error'; error?: string; }
+  export interface CreditEnablement { state: 'not-enabled' | 'not-required' | 'required' | 'best-effort' | 'api-key' | 'error'; error?: string; }
   export class OramPirClientAdapter {
     constructor(config: {
       serverUrl: string;
@@ -165,9 +165,16 @@ declare module 'bitcoin-pir-web' {
 declare module 'bitcoin-pir-web/attest-pin' {
   export interface ServerAttestPin {
     binarySha256Hex?: string;
+    /** A second accepted binary while a node without a TEE switches builds. */
+    transitionBinarySha256Hex?: string;
     measurementHex?: string;
     [k: string]: unknown;
   }
+  /** Whether a reported binary hash satisfies the pin: the pinned build, or the transition build while one is set. */
+  export function pinAcceptsBinary(
+    pin: { binarySha256Hex?: string; transitionBinarySha256Hex?: string },
+    binarySha256Hex: string,
+  ): boolean;
   export const AMD_TURIN_ARK_FINGERPRINT: Uint8Array;
   export const PIR1_PIN: ServerAttestPin;
   /** The pir2 slot since 2026-10-02 (MacBook, no TEE): binary pin only. */
