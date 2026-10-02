@@ -33,8 +33,9 @@ The query server used to be a VPSBG AMD SEV-SNP host (Tier 3, below) at
 `wss://weikeng2.bitcoinpir.org`. That host was retired on 2026-10-02.
 The pir2 roles now run on a MacBook without a TEE (server id
 `pir2-macbook-v1`), so both live servers are checked the same way: a
-binary pin plus the operator-signed identity. Direct ORAM needs a TEE
-and is paused until a new VPSBG TEE host exists.
+binary pin plus the operator-signed identity. Direct ORAM needs a TEE:
+since 2026-10-03 it runs on its own VPSBG SEV-SNP host (AMD Milan) at
+`wss://weikeng2.bitcoinpir.org`.
 </Callout>
 
 ## What "Tier 3" means
@@ -110,19 +111,19 @@ a binary pin and a verified operator identity.
 
 ### On a TEE host
 
-A server inside an AMD SEV-SNP guest (pir2 until 2026-10-02; Direct
-ORAM's next host) adds hardware evidence before the channel upgrade,
-where `pin` is that host's `ServerAttestPin` from `attest-pin.ts`:
+A server inside an AMD SEV-SNP guest (pir2 until 2026-10-02; the Direct
+ORAM host since 2026-10-03) adds hardware evidence before the channel
+upgrade, where `pin` is that host's `ServerAttestPin` from `attest-pin.ts`:
 
 ```ts
-import { AMD_TURIN_ARK_FINGERPRINT } from 'bitcoin-pir-web';
+import { AMD_MILAN_ARK_FINGERPRINT } from 'bitcoin-pir-web';
 
 if (attest.sevStatus !== 'reportDataMatch') {
   throw new Error(`SEV-SNP report did not bind: ${attest.sevStatus}`);
 }
-attest.verifyVcekChain(AMD_TURIN_ARK_FINGERPRINT);
-// The SEV-SNP report is signed by a real AMD Turin chip whose ARK
-// matches the operator's pin.
+attest.verifyVcekChain(AMD_MILAN_ARK_FINGERPRINT);
+// The SEV-SNP report is signed by a real AMD Milan chip whose ARK
+// matches the operator's pin (use the ARK of the host's generation).
 if (attest.launchMeasurementHex !== pin.measurementHex) {
   throw new Error('Server is running a different MEASUREMENT than expected');
 }
@@ -146,7 +147,11 @@ A one-shot validator that:
 
 On success: the report is cryptographically authentic and your client
 has cryptographically established that the chip generating it is a
-real AMD Turin SEV-capable processor.
+real AMD SEV-SNP processor of the pinned generation (Milan for the ORAM
+host). The adapters also hold every report chained to the Milan ARK to
+`AMD_MILAN_SEV_SNP_FLOOR`: a minimum TCB per component, the
+`ALIAS_CHECK_COMPLETE` platform bit and mitigation-vector bit 1, so a
+host on firmware without AMD's published Milan fixes is refused.
 
 ### `launchMeasurementHex`
 
@@ -203,19 +208,21 @@ The reference operator publishes pins in
 For wallets shipping with the reference deployment, bake those values
 into your bundle at build time and resync whenever the operator
 redeploys (the values rotate with every binary). The pins as of
-**2026-10-02**:
+**2026-10-03**:
 
 | Pin | Server | Pins |
 | --- | --- | --- |
 | `PIR1_PIN` | pir1 (Hetzner, no SEV) | binary SHA-256 |
 | `PIR2_MACBOOK_PIN` | pir2 (MacBook, no TEE) | binary SHA-256 |
-| `PIR2_TIER3_PIN` | the retired VPSBG pir2 | historical record only (binary + SEV-SNP MEASUREMENT); no live server matches it |
-| `AMD_TURIN_ARK_FINGERPRINT` | any SEV-SNP host | AMD's Turin root key |
+| `PIR2_TIER3_PIN` | the Direct ORAM host (VPSBG, AMD Milan) | binary SHA-256 + SEV-SNP MEASUREMENT |
+| `AMD_MILAN_ARK_FINGERPRINT` | the Direct ORAM host | AMD's Milan root key; its reports must also meet `AMD_MILAN_SEV_SNP_FLOOR` |
+| `AMD_TURIN_ARK_FINGERPRINT` | Turin SEV-SNP hosts | AMD's Turin root key |
 
 `PIR1_PROVIDER` and `PIR2_PROVIDER` (`production-providers.ts`) pair
 each binary pin with the endpoint, the expected server id and the
-operator key the identity check needs. `ORAM_PROVIDER` is `null` while
-Direct ORAM is paused.
+operator key the identity check needs. `ORAM_PROVIDER` does the same for
+the Direct ORAM host (server id `pir2-oram-v1`) and adds its ARK pin
+(Milan).
 
 <Callout kind="warn" title="These values rotate on every operator redeploy">
 A wallet baking these into its bundle will refuse to connect after

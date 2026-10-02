@@ -10,8 +10,9 @@
  * Payments: each snippet wires a credit provider (docs: /docs/sdk/payments).
  * The one shown is an empty wallet: DPF and HarmonyPIR run free while the
  * servers have room, and a backend a server charges for (OnionPIR) stops
- * the query with "credits required". Direct ORAM is paused (no TEE host):
- * its snippet stops at the ORAM_PROVIDER guard.
+ * the query with "credits required". Direct ORAM is free while its TEE
+ * host has room; its snippet stops at the ORAM_PROVIDER guard only if
+ * Direct ORAM is paused.
  */
 
 import type { Backend } from '@/components/BackendSelector';
@@ -240,9 +241,9 @@ try {
 
 const ORAM_SNIPPET = `// Direct ORAM — one server inside an AMD SEV-SNP guest. The server
 // process sees the script hash, the host does not; every lookup is one
-// fixed-budget ORAM request (25 padded slots). PAUSED: it needs a TEE
-// host, and none serves it since the VPSBG pir2 was retired on
-// 2026-10-02, so ORAM_PROVIDER is null and this stops at the guard.
+// fixed-budget ORAM request (25 padded slots). The host is a VPSBG
+// AMD Milan SEV-SNP guest; ORAM_PROVIDER is null only while Direct ORAM
+// is paused.
 
 import {
   OramPirClientAdapter,

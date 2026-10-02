@@ -291,8 +291,8 @@ export class WasmAttestVerification {
      * (signature-anchored AND content-acceptable).
      *
      * `expectedArkFingerprint`: same as `verifyVcekChain`. Pass the
-     * `AMD_TURIN_ARK_FINGERPRINT` constant from `attest-pin.ts` for
-     * production.
+     * ARK pin from `attest-pin.ts` for the server's CPU generation
+     * (Turin or Milan).
      *
      * `policy` is a `WasmPolicyRequirements` (constructed via its
      * JS-visible constructor + setters). Defaults to the strictest
@@ -1334,9 +1334,24 @@ export class WasmPolicyRequirements {
      */
     setMaxVmpl(v: number): void;
     /**
+     * Require every SVN of the report's `reported_tcb` to reach these
+     * values. `fmc` is only for generations that report one (Turin);
+     * pass `undefined` for Milan / Genoa.
+     */
+    setMinTcb(bootloader: number, tee: number, snp: number, microcode: number, fmc?: number | null): void;
+    /**
+     * Require `platform_info.alias_check_complete` (bit 5). Off by default.
+     */
+    setRequireAliasCheckComplete(v: boolean): void;
+    /**
      * Require guests to have `policy.single_socket_required`. Off by default.
      */
     setRequireSingleSocket(v: boolean): void;
+    /**
+     * Bits that must be set in both the launch and the current
+     * mitigation vector (report version 5+). `0` (default) disables it.
+     */
+    setRequiredMitVectorBits(bits: number): void;
 }
 
 /**
@@ -1746,6 +1761,12 @@ export function initTracingSubscriber(): void;
 export function mergeDelta(snapshot: WasmQueryResult, delta_raw: Uint8Array): WasmQueryResult;
 
 /**
+ * JS-visible accessor for the Milan ARK fingerprint pinned in
+ * pir-attest-verify (matches `web/src/attest-pin.ts`), for Milan servers.
+ */
+export function milanArkFingerprint(): Uint8Array;
+
+/**
  * Plan multi-round PBC placement. Returns JSON.
  */
 export function planRounds(item_groups_flat: Uint32Array, items_per: number, num_groups: number, num_hashes: number, max_kicks: number): any;
@@ -2081,7 +2102,10 @@ export interface InitOutput {
     readonly wasmpolicyrequirements_setExpectedImageId: (a: number, b: number, c: number) => [number, number];
     readonly wasmpolicyrequirements_setExpectedMeasurement: (a: number, b: number, c: number) => [number, number];
     readonly wasmpolicyrequirements_setMaxVmpl: (a: number, b: number) => void;
+    readonly wasmpolicyrequirements_setMinTcb: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+    readonly wasmpolicyrequirements_setRequireAliasCheckComplete: (a: number, b: number) => void;
     readonly wasmpolicyrequirements_setRequireSingleSocket: (a: number, b: number) => void;
+    readonly wasmpolicyrequirements_setRequiredMitVectorBits: (a: number, b: number) => void;
     readonly wasmqueryresult_chunkBins: (a: number) => any;
     readonly wasmqueryresult_entryCount: (a: number) => number;
     readonly wasmqueryresult_fromJson: (a: any) => [number, number, number];
@@ -2115,6 +2139,7 @@ export interface InitOutput {
     readonly xorBuffers: (a: number, b: number, c: number, d: number) => [number, number];
     readonly __wasm_init: () => void;
     readonly initTracingSubscriber: () => void;
+    readonly milanArkFingerprint: () => any;
     readonly turinArkFingerprint: () => any;
     readonly wasmsyncresult_syncedHeight: (a: number) => number;
     readonly wasmsyncresult_wasFreshSync: (a: number) => number;

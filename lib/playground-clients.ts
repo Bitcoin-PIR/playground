@@ -804,7 +804,7 @@ export async function runOnionPirQuery(
   }
 }
 
-// ── Direct ORAM backend (paused: no TEE host) ─────────────────────────────
+// ── Direct ORAM backend ───────────────────────────────────────────────────
 
 /**
  * The production Direct ORAM client configuration, shared by the structured
@@ -812,8 +812,9 @@ export async function runOnionPirQuery(
  * binary + MEASUREMENT), the operator-signed identity of the ORAM host, and a
  * database proof checked in the browser must all pass before any lookup, and
  * every lookup is one fixed-budget request (`PRODUCTION_ORAM_BATCH_PLANNER`).
- * Throws `ORAM_PAUSED_MESSAGE` while `ORAM_PROVIDER` is null (no TEE host
- * since the VPSBG pir2 was retired on 2026-10-02).
+ * The ORAM host is an AMD Milan, so its reports also meet the Milan TCB floor
+ * (`applySevSnpPlatformFloor` in the adapter). Throws `ORAM_PAUSED_MESSAGE` if
+ * `ORAM_PROVIDER` is null (no TEE host serving Direct ORAM).
  */
 export function oramProductionConfig(creditProvider: CreditProvider = NO_CREDITS) {
   const provider = ORAM_PROVIDER;

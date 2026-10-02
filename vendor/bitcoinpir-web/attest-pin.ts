@@ -1,4 +1,4 @@
-import { requireSdkWasm } from './sdk-bridge.js';
+import { requireSdkWasm, type WasmPolicyRequirements } from './sdk-bridge.js';
 import type { DatabaseProofPin } from './db-proof.js';
 
 /**
@@ -26,25 +26,54 @@ import type { DatabaseProofPin } from './db-proof.js';
  *      `pir-attest-verify::TURIN_ARK_FINGERPRINT_SHA256`, then rebuild
  *      the WASM bundle.
  *
- * Same fingerprint applies to all Turin-family chips. (Genoa, Milan,
- * etc. would have different ARKs and need their own pins; we only
- * deploy on Turin so far.)
+ * Same fingerprint applies to all Turin-family chips. Other generations
+ * have their own ARK and pin (Milan: [`AMD_MILAN_ARK_FINGERPRINT_HEX`]).
  */
 export const AMD_TURIN_ARK_FINGERPRINT_HEX =
   '1f084161a44bb6d93778a904877d4819cafa5d05ef4193b2ded9dd9c73dd3f6a';
 
-/** Decode the hex constant once at module load. Used as the
- *  authoritative *human-readable* source — the runtime value comes
- *  from WASM and is checked against this at [`getAmdTurinArkFingerprint`]
- *  call time. */
-const HEX_AS_BYTES: Uint8Array = (() => {
-  const hex = AMD_TURIN_ARK_FINGERPRINT_HEX;
+/**
+ * The AMD Milan-family ARK fingerprint, for SEV hosts on Milan (EPYC 7003).
+ * Pinned 2026-10-02 from https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
+ * (second PEM block, CN=ARK-Milan) for the VPSBG Direct ORAM host (EPYC
+ * 7713P). Same role, runtime source (`milanArkFingerprint()`, from
+ * `pir-attest-verify::MILAN_ARK_FINGERPRINT_SHA256`) and rotation steps as
+ * the Turin pin above. Reports chained to it must also meet
+ * [`AMD_MILAN_SEV_SNP_FLOOR`].
+ */
+export const AMD_MILAN_ARK_FINGERPRINT_HEX =
+  '69d063b45344d26a2e94e1f4210de49ef555308287d4c174445c95639a540bcd';
+
+function arkHexToBytes(hex: string): Uint8Array {
   const out = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
     out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
   return out;
-})();
+}
+
+/** Decode the hex constant once at module load. Used as the
+ *  authoritative *human-readable* source — the runtime value comes
+ *  from WASM and is checked against this at [`getAmdTurinArkFingerprint`]
+ *  call time. */
+const HEX_AS_BYTES: Uint8Array = arkHexToBytes(AMD_TURIN_ARK_FINGERPRINT_HEX);
+const MILAN_HEX_AS_BYTES: Uint8Array = arkHexToBytes(AMD_MILAN_ARK_FINGERPRINT_HEX);
+
+/** Cross-check a WASM-exported ARK fingerprint against its hex pin. */
+function checkedWasmArkFingerprint(name: string, fromWasm: Uint8Array, hex: string): Uint8Array {
+  if (fromWasm.length !== 32) {
+    throw new Error(
+      `attest-pin: WASM ${name} returned ${fromWasm.length} bytes (expected 32)`,
+    );
+  }
+  if (bytesToHex(fromWasm) !== hex) {
+    throw new Error(
+      `attest-pin: ARK fingerprint mismatch between WASM ${name} (${bytesToHex(fromWasm)}) ` +
+        `and its hex pin (${hex}). One was rotated without the other — fix and rebuild.`,
+    );
+  }
+  return fromWasm;
+}
 
 /**
  * Return the 32-byte ARK fingerprint sourced from the WASM module
@@ -65,24 +94,24 @@ const HEX_AS_BYTES: Uint8Array = (() => {
 let cachedArkFingerprint: Uint8Array | null = null;
 export function getAmdTurinArkFingerprint(): Uint8Array {
   if (cachedArkFingerprint) return cachedArkFingerprint;
-  const sdk = requireSdkWasm();
-  const fromWasm = sdk.turinArkFingerprint();
-  if (fromWasm.length !== 32) {
-    throw new Error(
-      `attest-pin: WASM turinArkFingerprint returned ${fromWasm.length} bytes (expected 32)`,
-    );
-  }
-  for (let i = 0; i < 32; i++) {
-    if (fromWasm[i] !== HEX_AS_BYTES[i]) {
-      throw new Error(
-        `attest-pin: ARK fingerprint mismatch between WASM (${bytesToHex(fromWasm)}) ` +
-          `and AMD_TURIN_ARK_FINGERPRINT_HEX (${AMD_TURIN_ARK_FINGERPRINT_HEX}). ` +
-          `One was rotated without the other — fix and rebuild.`,
-      );
-    }
-  }
-  cachedArkFingerprint = fromWasm;
-  return fromWasm;
+  cachedArkFingerprint = checkedWasmArkFingerprint(
+    'turinArkFingerprint',
+    requireSdkWasm().turinArkFingerprint(),
+    AMD_TURIN_ARK_FINGERPRINT_HEX,
+  );
+  return cachedArkFingerprint;
+}
+
+/** [`getAmdTurinArkFingerprint`] for the Milan ARK. */
+let cachedMilanArkFingerprint: Uint8Array | null = null;
+export function getAmdMilanArkFingerprint(): Uint8Array {
+  if (cachedMilanArkFingerprint) return cachedMilanArkFingerprint;
+  cachedMilanArkFingerprint = checkedWasmArkFingerprint(
+    'milanArkFingerprint',
+    requireSdkWasm().milanArkFingerprint(),
+    AMD_MILAN_ARK_FINGERPRINT_HEX,
+  );
+  return cachedMilanArkFingerprint;
 }
 
 /**
@@ -93,8 +122,52 @@ export function getAmdTurinArkFingerprint(): Uint8Array {
  */
 export const AMD_TURIN_ARK_FINGERPRINT: Uint8Array = HEX_AS_BYTES;
 
+/** Eager bytes of [`AMD_MILAN_ARK_FINGERPRINT_HEX`] for module-level
+ *  provider pins (`ProductionProviderPin.expectedArkFingerprint`). */
+export const AMD_MILAN_ARK_FINGERPRINT: Uint8Array = MILAN_HEX_AS_BYTES;
+
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * The TCB floor and platform checks every report chained to the Milan ARK
+ * must pass ([`applySevSnpPlatformFloor`]). Zen 3 has more public SEV-SNP
+ * attacks than Turin, each fixed by microcode or firmware.
+ *
+ * - `minTcb`: VPSBG server 26939's reported TCB, checked 2026-10-02. It meets
+ *   every Milan fix an attestation report can show in AMD-SB-3005, 3015,
+ *   3019, 3020, 3023, 3027, 3029 and 3033.
+ * - `requireAliasCheckComplete`: platform_info bit 5, for AMD-SB-3015/3033.
+ * - `requiredMitVectorBits`: mitigation-vector bit 1, for AMD-SB-3020.
+ *
+ * A report cannot show fixes that ship only in platform firmware
+ * (AMD-SB-3030) or protect against physical attacks (AMD-SB-3028/3032).
+ * Raise the floor after AMD publishes a new Milan fix.
+ */
+export const AMD_MILAN_SEV_SNP_FLOOR = {
+  minTcb: { bootloader: 4, tee: 0, snp: 29, microcode: 222 },
+  requireAliasCheckComplete: true,
+  requiredMitVectorBits: 0b10,
+} as const;
+
+/**
+ * Apply the TCB floor for the generation `arkFingerprint` pins: Milan gets
+ * [`AMD_MILAN_SEV_SNP_FLOOR`]; Turin keeps the default policy. Call it on
+ * the policy passed to every `verifyFull` with that fingerprint.
+ */
+export function applySevSnpPlatformFloor(
+  policy: Pick<
+    WasmPolicyRequirements,
+    'setMinTcb' | 'setRequireAliasCheckComplete' | 'setRequiredMitVectorBits'
+  >,
+  arkFingerprint: Uint8Array | null | undefined,
+): void {
+  if (!arkFingerprint || bytesToHex(arkFingerprint) !== AMD_MILAN_ARK_FINGERPRINT_HEX) return;
+  const { bootloader, tee, snp, microcode } = AMD_MILAN_SEV_SNP_FLOOR.minTcb;
+  policy.setMinTcb(bootloader, tee, snp, microcode);
+  policy.setRequireAliasCheckComplete(AMD_MILAN_SEV_SNP_FLOOR.requireAliasCheckComplete);
+  policy.setRequiredMitVectorBits(AMD_MILAN_SEV_SNP_FLOOR.requiredMitVectorBits);
 }
 
 /**
@@ -148,24 +221,25 @@ export function pinAcceptsBinary(
 }
 
 /**
- * weikeng2.bitcoinpir.org — VPSBG Tier 3 SNP-sealed UKI, pinned 2026-09-24
- * after the r9 rollout (Observe/Enroll/Probe/Ready on image 321, source
- * `9c70bb6e`, run by scripts/pir2-sealed-campaign.sh). Image 321 serves DPF,
- * Harmony-query and TEE ORAM with credits verified at the issuer and the
- * access policy (HarmonyPIR paid; DPF and Direct ORAM free while the guest
- * has room), no session grants, its own Ready receipts read-only,
- * --help/--version, an hourly hint-pool timing summary, and bakes
- * cloudflared 2026.8.3.
+ * weikeng2.bitcoinpir.org — the Direct ORAM host since 2026-10-02: VPSBG
+ * server 26939, an AMD EPYC 7713P (Milan), so its reports chain to the
+ * Milan ARK and must meet AMD_MILAN_SEV_SNP_FLOOR. Tier 3 SNP-sealed UKI
+ * image 359 (r10, source `64067cc9`, kernel 6.17.0-23, built on pir1),
+ * sealed generation 10 as `pir2-oram-v1`: Observe/Enroll/Probe/Probe/Ready
+ * with the pir2 operator key. It runs `unified_server --oram-only` (no DPF,
+ * HarmonyPIR or OnionPIR tables; the attested root is the tagged ORAM-only
+ * root), builds Direct ORAM from hash-checked in-memory inputs, and serves
+ * it free while the guest has room (credits otherwise).
  */
 export const PIR2_TIER3_PIN: ServerAttestPin = {
-  // Captured from live image 321 after AMD chain + REPORT_DATA verification
-  // in scripts/pir2-post-switch-check.sh. binary_sha256 and MEASUREMENT
-  // mismatched the previous image-309 pin, as expected for this UKI.
+  // MEASUREMENT read back from the signed Observe report (ordinal 71), equal
+  // to the offline prediction for this UKI + pinned OVMF on 4 Milan vCPUs;
+  // binary_sha256 is the stripped unified_server baked into image 359.
   measurementHex:
-    '55673231882debdf730aec01ed6750adf73deb301c7f94a6d672cc7e09732f6dd5c012ed5f01b071019f52e48f4b30f7',
+    '4271e56548b2c968e28bd0eedf35fb3a4684075de52e84943b904b7bcdda3e2046b9332c4c580705fd759eb8bfbaba0d',
   binarySha256Hex:
-    'e39c554f9a3883f03cde14741376a25f7ac5a7876998b1e36f3d71a96eb835f5',
-  description: 'weikeng2.bitcoinpir.org (VPSBG image 321, SEV-SNP, sealed Tier 3 DPF + Harmony + Direct ORAM, credits with DPF/ORAM best-effort free and HarmonyPIR paid, Ready receipts over WS)',
+    '03cafc89a3088836e9a775f6899d91b44110bf6331440515e93fd50c8cfe67a6',
+  description: 'weikeng2.bitcoinpir.org (VPSBG server 26939, AMD Milan SEV-SNP, sealed Tier 3 image 359: Direct ORAM only, best-effort free)',
 };
 
 /**

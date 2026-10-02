@@ -100,7 +100,7 @@ declare module 'bitcoin-pir-web' {
   }
   export const PIR1_PROVIDER: ProductionProviderPin;
   export const PIR2_PROVIDER: ProductionProviderPin;
-  /** Direct ORAM host; null while paused (no TEE host since 2026-10-02). */
+  /** Direct ORAM host (VPSBG, AMD Milan SEV-SNP); null if Direct ORAM is paused. */
   export const ORAM_PROVIDER: ProductionProviderPin | null;
   export const ORAM_PAUSED_MESSAGE: string;
   /** The production Direct ORAM request shape (25 padded slots). */
@@ -176,10 +176,12 @@ declare module 'bitcoin-pir-web/attest-pin' {
     binarySha256Hex: string,
   ): boolean;
   export const AMD_TURIN_ARK_FINGERPRINT: Uint8Array;
+  /** The ARK of the Direct ORAM host's generation (Milan). */
+  export const AMD_MILAN_ARK_FINGERPRINT: Uint8Array;
   export const PIR1_PIN: ServerAttestPin;
   /** The pir2 slot since 2026-10-02 (MacBook, no TEE): binary pin only. */
   export const PIR2_MACBOOK_PIN: ServerAttestPin;
-  /** Historical: the retired VPSBG SEV-SNP pir2. */
+  /** The Direct ORAM TEE host (VPSBG, AMD Milan): SEV-SNP MEASUREMENT + binary. */
   export const PIR2_TIER3_PIN: ServerAttestPin;
   export const PRODUCTION_ORAM_DB_PROOF_V2_PINS: unknown[];
 }

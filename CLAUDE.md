@@ -148,8 +148,9 @@ Source of truth: CLAUDE.md in the main `Bitcoin-PIR/Bitcoin-PIR` repo. Mirror he
 | --- | --- | --- | --- |
 | `wss://weikeng1.bitcoinpir.org` (pir1) | hint + DPF server 0 + OnionPIR — DPF and HarmonyPIR hints best-effort free (hints capped per hour), OnionPIR paid | Hetzner i7-8700 (no SEV) | binary SHA-256 pin + operator-signed identity |
 | `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` (pir2, server id `pir2-macbook-v1`) | DPF server 1 + HarmonyPIR query — DPF and HarmonyPIR best-effort free | MacBook, macOS arm64, **no TEE** | binary SHA-256 pin + operator-signed identity |
+| `wss://weikeng2.bitcoinpir.org` (ORAM host, server id `pir2-oram-v1`) | Direct ORAM only (`--oram-only`) — best-effort free | VPSBG cloud VPS, AMD EPYC 7713P (Milan), SEV-SNP Tier 3 UKI | SEV-SNP MEASUREMENT + binary SHA-256 pin, Milan ARK chain + `AMD_MILAN_SEV_SNP_FLOOR`, operator-signed identity |
 
-The VPSBG SEV-SNP pir2 (`wss://weikeng2.bitcoinpir.org`) was retired on 2026-10-02 and that endpoint is down; `PIR2_TIER3_PIN` is kept upstream as a historical record only. **Direct ORAM is paused** until a new VPSBG TEE host exists: `ORAM_PROVIDER` is `null`, and the ORAM backend/snippet stop with `ORAM_PAUSED_MESSAGE`.
+The VPSBG SEV-SNP pir2 that served DPF/HarmonyPIR/ORAM was retired on 2026-10-02. Since 2026-10-03 `wss://weikeng2.bitcoinpir.org` is a new VPSBG host (AMD Milan) that serves **Direct ORAM only**: `PIR2_TIER3_PIN` pins it (MEASUREMENT + binary), `ORAM_PROVIDER` carries it with the Milan ARK (`AMD_MILAN_ARK_FINGERPRINT`), and the adapters hold its reports to the Milan TCB floor. `ORAM_PAUSED_MESSAGE` is only shown if `ORAM_PROVIDER` is `null` again.
 
 Pins live in `vendor/bitcoinpir-web/attest-pin.ts` (never copy the values into prose). The two servers run **different** builds (pir1 Linux, pir2 macOS arm64), so `PIR1_PIN` and `PIR2_MACBOOK_PIN` differ. Each server's `REQ_ANNOUNCE` identity is endorsed by **its own** operator key: gate the "verified operator" badge on `operatorIdentity.state === 'verified'` against `PIR1_PROVIDER.operatorPubkey` / `PIR2_PROVIDER.operatorPubkey` (`vendor/bitcoinpir-web/production-providers.ts`) plus the provider's `stableServerId` — never on `chainVerified` alone (a MITM can self-sign a consistent bundle). The legacy single `PIR_OPERATOR_PUBKEY` no longer matches pir2. With no TEE on either server, the structured DPF/HarmonyPIR path ("Run query") refuses to query unless every `noSevHost` leg has a verified identity whose signed binary matches the pin (`noTeeLegFailures` in `lib/playground-clients.ts`, mirroring upstream strict mode); the DPF/HarmonyPIR snippets do the same check.
 
@@ -177,6 +178,13 @@ npm run copy-monaco             # self-host Monaco assets (auto on predev/prebui
 Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
+
+## Recent history (2026-10-03) — Direct ORAM back on a Milan TEE host
+
+Upstream #374–#377 + #379 restored Direct ORAM on a new VPSBG host: `wss://weikeng2.bitcoinpir.org`, server 26939, AMD EPYC 7713P (Milan), sealed image 359 as `pir2-oram-v1`, `--oram-only`.
+- **Vendor** re-synced from BitcoinPIR `c4022416` (web/src + wasm): `ORAM_PROVIDER` set (Milan ARK `AMD_MILAN_ARK_FINGERPRINT`), `PIR2_TIER3_PIN` = the ORAM host's MEASUREMENT + binary, `AMD_MILAN_SEV_SNP_FLOOR` applied before every `verifyFull` with the Milan ARK, the tagged ORAM-only attested root, and the wasm setters `setMinTcb`/`setRequireAliasCheckComplete`/`setRequiredMitVectorBits` + `milanArkFingerprint`. web/src and the wasm must move together: an older wasm makes ORAM connect fail with `setMinTcb is not a function`.
+- **Text**: ORAM TEE backend no longer "paused" (selector, playground intro, snippet comments, ambient types); endpoints/attestation/index/payments/typescript docs, nav summary and README describe the ORAM host (Milan ARK + TCB floor).
+- **Verified live** from a local dev build: ORAM TEE returns 6 UTXOs / 254,603 sat for the Pizza Day address with AMD chain OK, binary + MEASUREMENT pins, operator-endorsed `pir2-oram-v1` and the database proof verified (query 10.5 s); DPF returns the identical 6 UTXOs for the same address.
 
 ## Recent history (2026-10-02) — transition pins + operator API key re-vendor
 
@@ -336,7 +344,7 @@ Migrated from `bitcoin-pir.github.io/playground/` → `sdk.bitcoinpir.org`:
 
 ## Pin / hash reference (as of 2026-06-11)
 
-Historical snapshot; current pins are in `vendor/bitcoinpir-web/attest-pin.ts`. Since 2026-10-02 no live server is SEV-SNP (see Servers above).
+Historical snapshot; current pins are in `vendor/bitcoinpir-web/attest-pin.ts`. Since 2026-10-03 the only live SEV-SNP server is the Direct ORAM host (see Servers above).
 
 - Reproducible unified_server binary: SHA-256 `bb2cf422f90ab8f8033ba42203cb95af3e0d3fd45ad3480ec8fb0f7a54922439` (v24, 2026-06 security review)
 - Tier 3 UKI: **v24** (2026-06-11) — the SEV-SNP MEASUREMENT below is the attested value; clients pin the binary SHA + MEASUREMENT, not the UKI file (upstream notes UKI file sha256 `4eefec07…`).

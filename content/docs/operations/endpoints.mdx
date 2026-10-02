@@ -1,8 +1,9 @@
 # Live endpoints
 
-The Bitcoin PIR reference deployment runs two servers — `pir1` and
-`pir2` — with deliberately different roles. Wallets connect to both;
-the [SDK](/docs/sdk/typescript) handles the routing.
+The Bitcoin PIR reference deployment runs two PIR servers — `pir1` and
+`pir2` — with deliberately different roles, plus a Direct ORAM host inside
+an AMD SEV-SNP enclave. Wallets connect to the servers of the backend they
+use; the [SDK](/docs/sdk/typescript) handles the routing.
 
 ## The two roles
 
@@ -10,25 +11,28 @@ the [SDK](/docs/sdk/typescript) handles the routing.
 | --------------------------------- | ---------- | --------------- | --------------------- | ------- | ------- |
 | `wss://weikeng1.bitcoinpir.org`   | pir1       | **Hint server** (+ DPF server 0, OnionPIR) | Hetzner i7-8700 | No | DPF and HarmonyPIR hints free while it has room (hints up to an hourly budget); OnionPIR paid |
 | `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` | pir2 | **Query server** (+ DPF server 1) | MacBook (macOS arm64) | No | DPF and HarmonyPIR queries free while it has room |
+| `wss://weikeng2.bitcoinpir.org` | ORAM host | **Direct ORAM** only | VPSBG cloud VPS, AMD EPYC 7713P (Milan) | Yes (Tier 3 UKI) | Direct ORAM free while it has room |
 
 Each server publishes what it charges per backend
 ([Payments](/docs/sdk/payments)): DPF-PIR and HarmonyPIR (hints on pir1,
 queries on pir2) are free while the servers have room, while OnionPIR
 needs a credit provider.
 
-<Callout kind="warn" title="pir2 has no TEE; Direct ORAM is paused">
+<Callout kind="warn" title="pir2 has no TEE; Direct ORAM has its own TEE host">
 Until 2026-10-02 pir2 was a VPSBG AMD SEV-SNP host (Tier 3 UKI) at
 `wss://weikeng2.bitcoinpir.org`, which also served Direct ORAM. That host
-was retired and the endpoint is down. A MacBook without a TEE now serves
-the pir2 roles under the server id `pir2-macbook-v1`. Direct ORAM needs a
-TEE, so it is paused until a new VPSBG TEE host exists.
+was retired; a MacBook without a TEE now serves the pir2 roles under the
+server id `pir2-macbook-v1`. Since 2026-10-03 `wss://weikeng2.bitcoinpir.org`
+is a new VPSBG SEV-SNP host (AMD Milan, server id `pir2-oram-v1`) that
+serves Direct ORAM only.
 </Callout>
 
 The hint/query split is intentional. The hint server runs on commodity
 hardware because the hint blob alone reveals nothing about which
-addresses are queried. Neither live server has hardware attestation
+addresses are queried. Neither PIR server has hardware attestation
 today: each is checked by its binary pin plus its operator-signed
-identity (see [Attestation](/docs/privacy/attestation)).
+identity. The ORAM host is attested by AMD SEV-SNP as well (see
+[Attestation](/docs/privacy/attestation)).
 
 ```text
                   ┌───────────────────────────┐
@@ -53,13 +57,13 @@ identity (see [Attestation](/docs/privacy/attestation)).
                   │   - HarmonyPIR query srv  │
                   │   (no OnionPIR — runs     │
                   │    on pir1 only; Direct   │
-                  │    ORAM paused)           │
+                  │    ORAM: weikeng2 TEE)    │
                   └───────────────────────────┘
 ```
 
 ## WebSocket-only
 
-Both endpoints are **WebSocket-only**. A plain HTTP `GET /` returns
+All three endpoints are **WebSocket-only**. A plain HTTP `GET /` returns
 502 by design — there is no HTTP fallback, no JSON-RPC layer, no
 SSE.
 
@@ -115,14 +119,15 @@ runs `--serve-queries` only and does not serve OnionPIR. Check
 [attest-pin.ts](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/web/src/attest-pin.ts)
 for the canonical config.
 
-### Direct ORAM (paused)
+### Direct ORAM
 
 Direct ORAM is single-server too and runs inside an SEV-SNP guest: the
-server process sees the script hash, the host does not. It ran on the
-VPSBG `pir2` until that host was retired on 2026-10-02, and it is
-**paused** until a new VPSBG TEE host exists: `ORAM_PROVIDER` is `null`
-and clients stop with `ORAM_PAUSED_MESSAGE`. Once a host is back, use the
-strict client with the production request shape — every lookup is one
+server process sees the script hash, the host does not. Since 2026-10-03
+it runs on its own VPSBG host (`wss://weikeng2.bitcoinpir.org`, AMD Milan,
+server id `pir2-oram-v1`), free while the guest has room. `ORAM_PROVIDER`
+carries its endpoint and pins; it is `null` only while Direct ORAM is
+paused, and clients then stop with `ORAM_PAUSED_MESSAGE`. Use the strict
+client with the production request shape — every lookup is one
 fixed-budget ORAM access with 25 padded slots:
 
 ```ts
@@ -130,7 +135,7 @@ import {
   OramPirClientAdapter, ORAM_PROVIDER, ORAM_PAUSED_MESSAGE, PRODUCTION_ORAM_BATCH_PLANNER,
 } from 'bitcoin-pir-web';
 
-if (!ORAM_PROVIDER) throw new Error(ORAM_PAUSED_MESSAGE);  // paused today
+if (!ORAM_PROVIDER) throw new Error(ORAM_PAUSED_MESSAGE);  // null only while paused
 
 new OramPirClientAdapter({
   serverUrl: ORAM_PROVIDER.endpoint,
