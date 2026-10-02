@@ -18,9 +18,9 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
               <div className="font-semibold">Server busy</div>
               <p className="mt-1">
                 This backend is free while the server has room, and right now it has none: paid
-                lookups go first and the free lane is full. Retry in a moment; a wallet with
-                credits would have paid for priority instead. Attestation and identity below are
-                real; no UTXOs were fetched.{' '}
+                lookups go first, and the free lane is full or has used its hourly free budget.
+                Retry later; a wallet with credits would have paid for priority instead.
+                Attestation and identity below are real; no UTXOs were fetched.{' '}
                 <Link href="/docs/sdk/payments" className="underline">
                   How payments work
                 </Link>
@@ -38,8 +38,8 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
                 About {result.paymentRequired.approxCredits} credit
                 {result.paymentRequired.approxCredits === 1 ? '' : 's'} (≈{' '}
                 {result.paymentRequired.approxCredits * CREDIT_SAT} sat) per single-address lookup
-                when every server of this backend charges. DPF-PIR is free while the servers have
-                room.{' '}
+                when every server of this backend charges. DPF-PIR and HarmonyPIR are free while
+                the servers have room.{' '}
                 <Link href="/docs/sdk/payments" className="underline">
                   How payments work
                 </Link>

@@ -8,11 +8,11 @@ wallet, in a desktop wallet that ships a Node runtime, or in any
 JS environment with a `WebSocket`.
 
 <Callout kind="note" title="Free while the servers have room">
-The reference servers serve DPF free on a best-effort lane: paid lookups
-go first, and when the free lane is full a server answers
-`free capacity busy` instead. A [credit provider](/docs/sdk/payments)
-added after the sealed channel (step 5) pays for priority then;
-HarmonyPIR and OnionPIR always need one.
+The reference servers serve DPF (and HarmonyPIR) free on a best-effort
+lane: paid lookups go first, and when the free lane is full a server
+answers `free capacity busy` instead. A [credit provider](/docs/sdk/payments)
+added after the sealed channel (step 5) pays for priority then; OnionPIR
+always needs one.
 </Callout>
 
 By the end you'll have:
