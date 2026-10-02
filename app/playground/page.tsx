@@ -26,10 +26,10 @@ export default function PlaygroundPage() {
           entirely in your browser.
         </p>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-          <strong>DPF-PIR</strong> is free while the servers have room: paid lookups go first,
-          and a busy server says so. HarmonyPIR and OnionPIR cost{' '}
+          <strong>DPF-PIR</strong> and <strong>HarmonyPIR</strong> are free while the servers
+          have room: paid lookups go first, and a busy server says so. OnionPIR costs{' '}
           <a href="/docs/sdk/payments" className="underline">credits</a>, and the playground
-          has no wallet yet, so those stop at the first paid frame and show why.{' '}
+          has no wallet yet, so it stops at the first paid frame and shows why.{' '}
           <strong>ORAM TEE</strong> is paused until a new TEE host serves it.
         </p>
       </div>

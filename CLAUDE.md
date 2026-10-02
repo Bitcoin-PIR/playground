@@ -146,14 +146,14 @@ Source of truth: CLAUDE.md in the main `Bitcoin-PIR/Bitcoin-PIR` repo. Mirror he
 
 | Endpoint | Role | Hardware | Attestation |
 | --- | --- | --- | --- |
-| `wss://weikeng1.bitcoinpir.org` (pir1) | hint + DPF server 0 + OnionPIR — DPF best-effort free, HarmonyPIR/OnionPIR paid | Hetzner i7-8700 (no SEV) | binary SHA-256 pin + operator-signed identity |
-| `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` (pir2, server id `pir2-macbook-v1`) | DPF server 1 + HarmonyPIR query — DPF best-effort free, HarmonyPIR paid | MacBook, macOS arm64, **no TEE** | binary SHA-256 pin + operator-signed identity |
+| `wss://weikeng1.bitcoinpir.org` (pir1) | hint + DPF server 0 + OnionPIR — DPF and HarmonyPIR hints best-effort free (hints capped per hour), OnionPIR paid | Hetzner i7-8700 (no SEV) | binary SHA-256 pin + operator-signed identity |
+| `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` (pir2, server id `pir2-macbook-v1`) | DPF server 1 + HarmonyPIR query — DPF and HarmonyPIR best-effort free | MacBook, macOS arm64, **no TEE** | binary SHA-256 pin + operator-signed identity |
 
 The VPSBG SEV-SNP pir2 (`wss://weikeng2.bitcoinpir.org`) was retired on 2026-10-02 and that endpoint is down; `PIR2_TIER3_PIN` is kept upstream as a historical record only. **Direct ORAM is paused** until a new VPSBG TEE host exists: `ORAM_PROVIDER` is `null`, and the ORAM backend/snippet stop with `ORAM_PAUSED_MESSAGE`.
 
 Pins live in `vendor/bitcoinpir-web/attest-pin.ts` (never copy the values into prose). The two servers run **different** builds (pir1 Linux, pir2 macOS arm64), so `PIR1_PIN` and `PIR2_MACBOOK_PIN` differ. Each server's `REQ_ANNOUNCE` identity is endorsed by **its own** operator key: gate the "verified operator" badge on `operatorIdentity.state === 'verified'` against `PIR1_PROVIDER.operatorPubkey` / `PIR2_PROVIDER.operatorPubkey` (`vendor/bitcoinpir-web/production-providers.ts`) plus the provider's `stableServerId` — never on `chainVerified` alone (a MITM can self-sign a consistent bundle). The legacy single `PIR_OPERATOR_PUBKEY` no longer matches pir2. With no TEE on either server, the structured DPF/HarmonyPIR path ("Run query") refuses to query unless every `noSevHost` leg has a verified identity whose signed binary matches the pin (`noTeeLegFailures` in `lib/playground-clients.ts`, mirroring upstream strict mode); the DPF/HarmonyPIR snippets do the same check.
 
-Credits (main repo `docs/CREDITS.md`; site doc `content/docs/sdk/payments.mdx`): a server refuses metered frames it charges for until the connection is funded (`enableCredits` after the sealed channel). The playground has no wallet yet — its credit provider is empty, so HarmonyPIR/OnionPIR end in a "Payment required" result, and DPF (free while the servers have room) is the default backend. Buying in the browser from this origin needs `sdk.bitcoinpir.org` in the issuer's `cors_origins`.
+Credits (main repo `docs/CREDITS.md`; site doc `content/docs/sdk/payments.mdx`): a server refuses metered frames it charges for until the connection is funded (`enableCredits` after the sealed channel). The playground has no wallet yet — its credit provider is empty, so OnionPIR ends in a "Payment required" result; DPF and HarmonyPIR are free while the servers have room (a busy free lane ends in "Server busy"), and DPF is the default backend. The servers also accept operator API keys (opcode `0x13`, unmetered connection); the playground deliberately has no UI for them. Buying in the browser from this origin needs `sdk.bitcoinpir.org` in the issuer's `cors_origins`.
 
 If a redeploy bumps either SHA or MEASUREMENT: update `vendor/bitcoinpir-web/attest-pin.ts` in the main repo, push, resync vendor here.
 
@@ -177,6 +177,13 @@ npm run copy-monaco             # self-host Monaco assets (auto on predev/prebui
 Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
+
+## Recent history (2026-10-02) — r10 pins re-vendor, HarmonyPIR free while the servers have room
+
+Re-vendored BitcoinPIR `5cc9fb90`: `PIR1_PIN` / `PIR2_MACBOOK_PIN` for the `197511f8` rebuild both servers run, HarmonyPIR half-hint pricing (#364) in `credits.ts`, and a **rebuilt wasm** (`crates/sdk/client` + `crates/trust/pir-credit` changed; #365's `present_api_key` is not exported to JS, so `.js` / `.d.ts` stayed byte-identical).
+- **Wasm recipe** (upstream CI's flags plus upstream's path-remap convention, so the bytes don't depend on the checkout path; two clones at different paths gave the same `.wasm`): `RUSTFLAGS="--remap-path-prefix=$PWD=/build/repo --remap-path-prefix=$HOME=/build" CARGO_NET_OFFLINE=true wasm-pack build crates/sdk/wasm --target web --out-dir pkg --mode no-install --no-opt -- --locked --offline` (wasm-pack 0.14.0, wasm-bindgen 0.2.114, rustc 1.94.1). The earlier vendored wasm had been through wasm-opt; `--no-opt` keeps the `name` section, so the `.wasm` went from 2.13 to 2.62 MB. A first build into a fresh `pkg/` leaves the LICENSE files out of `package.json` `files`; a second build lists them.
+- **Text**: HarmonyPIR is best-effort free on both servers (pir1 caps free hint work per hour), OnionPIR still paid — payments, endpoints, quickstart and troubleshooting docs, playground intro, backend tagline, result panel, snippets, and the explorer notice (which also still called DPF paid).
+- **Verified live** from a local dev build: DPF and HarmonyPIR both return 2 UTXOs / 1,284 sat for `1Q2TWHE3…` without credits, both servers pin-matched and operator-endorsed at git `197511f8`, credits best-effort on both; the explorer's cleartext HarmonyPIR run for `1D4HSHPJ…` completes with all invariants PASS (T−1 check via the rebuilt wasm).
 
 ## Recent history (2026-10-02) — pir2 moves to the MacBook node (no TEE), Direct ORAM paused
 

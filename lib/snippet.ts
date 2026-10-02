@@ -8,8 +8,8 @@
  * imports to the same live SDK the structured path uses).
  *
  * Payments: each snippet wires a credit provider (docs: /docs/sdk/payments).
- * The one shown is an empty wallet: DPF runs free while the servers have
- * room, and a backend a server charges for (HarmonyPIR and OnionPIR) stops
+ * The one shown is an empty wallet: DPF and HarmonyPIR run free while the
+ * servers have room, and a backend a server charges for (OnionPIR) stops
  * the query with "credits required". Direct ORAM is paused (no TEE host):
  * its snippet stops at the ORAM_PROVIDER guard.
  */
@@ -121,8 +121,9 @@ try {
 
 const HARMONY_SNIPPET = `// HarmonyPIR — two servers + offline hint phase, optimised for bigger
 // batches. The first query fetches a ~140 MB hint set from the hint
-// server (pir1, which charges credits: with the empty wallet below this
-// stops at the hint download).
+// server (pir1). Free while the servers have room: both serve HarmonyPIR
+// on a best-effort free lane, and pir1 also caps free hint work per hour
+// (with the empty wallet below, a busy server answers "free capacity busy").
 
 import init, { WasmHarmonyClient } from 'pir-sdk-wasm';
 import {
@@ -165,7 +166,7 @@ try {
 
   // Fetches the hint set on first use, then queries and verifies the
   // per-bucket Merkle proofs — all or nothing. Persist \`saveHints()\` to
-  // IndexedDB to keep the (paid) hint set across page reloads.
+  // IndexedDB to keep the hint set across page reloads.
   const [result] = await client.queryBatchVerified(sh, 0);
   console.log('balance (sats):', result.totalBalance);
   for (let i = 0; i < result.entryCount; i++) {

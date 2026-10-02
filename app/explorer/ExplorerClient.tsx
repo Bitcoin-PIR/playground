@@ -130,12 +130,13 @@ export function ExplorerClient() {
           />
         </div>
         <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          pir1 (DPF server0, the HarmonyPIR hint server, OnionPIR) requires credits for
-          every metered frame, and credits can only be presented inside the sealed channel.
-          The explorer keeps the wire in cleartext so the frames stay readable, so a run
-          stops at pir1&apos;s first metered frame (&ldquo;insufficient gas&rdquo;); the
-          frames captured up to that point are still shown and checked. Paid queries run in
-          the <a href="/playground" className="underline">playground</a>.
+          DPF and HarmonyPIR are free while the servers have room. OnionPIR (pir1) requires
+          credits for every metered frame, and credits can only be presented inside the sealed
+          channel. The explorer keeps the wire in cleartext so the frames stay readable, so an
+          OnionPIR run stops at pir1&apos;s first metered frame (&ldquo;insufficient
+          gas&rdquo;), as does any run that finds a free lane busy (&ldquo;free capacity
+          busy&rdquo;); the frames captured up to that point are still shown and checked. Paid
+          queries run in the <a href="/playground" className="underline">playground</a>.
         </p>
         <div className="mt-3 flex flex-wrap items-end gap-2">
           <label className="block flex-1 min-w-[260px]">

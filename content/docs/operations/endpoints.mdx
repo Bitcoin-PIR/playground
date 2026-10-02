@@ -8,13 +8,13 @@ the [SDK](/docs/sdk/typescript) handles the routing.
 
 | Endpoint                          | Short name | Role            | Hardware              | SEV-SNP | Credits |
 | --------------------------------- | ---------- | --------------- | --------------------- | ------- | ------- |
-| `wss://weikeng1.bitcoinpir.org`   | pir1       | **Hint server** (+ DPF server 0, OnionPIR) | Hetzner i7-8700 | No | DPF free while it has room; HarmonyPIR hints and OnionPIR paid |
-| `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` | pir2 | **Query server** (+ DPF server 1) | MacBook (macOS arm64) | No | DPF free while it has room; HarmonyPIR queries paid |
+| `wss://weikeng1.bitcoinpir.org`   | pir1       | **Hint server** (+ DPF server 0, OnionPIR) | Hetzner i7-8700 | No | DPF and HarmonyPIR hints free while it has room (hints up to an hourly budget); OnionPIR paid |
+| `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` | pir2 | **Query server** (+ DPF server 1) | MacBook (macOS arm64) | No | DPF and HarmonyPIR queries free while it has room |
 
 Each server publishes what it charges per backend
-([Payments](/docs/sdk/payments)): DPF-PIR is free while the servers have
-room, while HarmonyPIR (hints on pir1, queries on pir2) and OnionPIR need
-a credit provider.
+([Payments](/docs/sdk/payments)): DPF-PIR and HarmonyPIR (hints on pir1,
+queries on pir2) are free while the servers have room, while OnionPIR
+needs a credit provider.
 
 <Callout kind="warn" title="pir2 has no TEE; Direct ORAM is paused">
 Until 2026-10-02 pir2 was a VPSBG AMD SEV-SNP host (Tier 3 UKI) at
