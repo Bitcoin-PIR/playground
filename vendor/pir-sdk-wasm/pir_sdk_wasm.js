@@ -1577,6 +1577,21 @@ export class WasmDpfClient {
         return ret;
     }
     /**
+     * Present an operator-issued API key on one server (`serverIndex` ∈
+     * {0, 1}; docs/CREDITS.md "API keys"). Once accepted, that connection
+     * is served unmetered, so skip `enableCredits` for it. Bearer
+     * material: call after [`Self::upgrade_to_secure_channel`].
+     * @param {number} server_index
+     * @param {string} key
+     * @returns {Promise<void>}
+     */
+    presentApiKey(server_index, key) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmdpfclient_presentApiKey(this.__wbg_ptr, server_index, ptr0, len0);
+        return ret;
+    }
+    /**
      * Present credits (docs/CREDITS.md) on one server (`serverIndex` ∈
      * {0, 1}): `kind` 1 is a Cashu token, 2 an ARC payload from
      * [`crate::WasmArcCredential::present`]. Resolves to
@@ -2191,6 +2206,19 @@ export class WasmHarmonyClient {
         return ret;
     }
     /**
+     * Present an operator-issued API key on the hint (0) or query (1)
+     * server. See [`WasmDpfClient::present_api_key`].
+     * @param {number} server_index
+     * @param {string} key
+     * @returns {Promise<void>}
+     */
+    presentApiKey(server_index, key) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmharmonyclient_presentApiKey(this.__wbg_ptr, server_index, ptr0, len0);
+        return ret;
+    }
+    /**
      * Present credits (docs/CREDITS.md) on the hint (0) or query (1)
      * server; resolves to `{ gasAdded, gasBalance }`. See
      * [`WasmDpfClient::present_credits`].
@@ -2554,6 +2582,18 @@ export class WasmOramClient {
         this.__wbg_ptr = ret >>> 0;
         WasmOramClientFinalization.register(this, this.__wbg_ptr, this);
         return this;
+    }
+    /**
+     * Present an operator-issued API key on the connection. See
+     * [`WasmDpfClient::present_api_key`].
+     * @param {string} key
+     * @returns {Promise<void>}
+     */
+    presentApiKey(key) {
+        const ptr0 = passStringToWasm0(key, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.wasmoramclient_presentApiKey(this.__wbg_ptr, ptr0, len0);
+        return ret;
     }
     /**
      * Present credits (docs/CREDITS.md) on the connection; resolves to
@@ -4282,27 +4322,27 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 467, function: Function { arguments: [Externref], shim_idx: 468, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 482, function: Function { arguments: [Externref], shim_idx: 483, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h490263039c0c107c, wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 641, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 642, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 657, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 641, function: Function { arguments: [NamedExternref("Event")], shim_idx: 642, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [NamedExternref("Event")], shim_idx: 657, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_2);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 641, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 642, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 657, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_3);
             return ret;
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 641, function: Function { arguments: [], shim_idx: 644, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 656, function: Function { arguments: [], shim_idx: 659, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__hc39032372d75848d);
             return ret;
         },

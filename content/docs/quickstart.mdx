@@ -153,14 +153,15 @@ walkthrough](/docs/privacy/attestation). Neither live server has a TEE
 MEASUREMENT to check:
 
 ```ts
-import { PIR1_PIN, PIR2_MACBOOK_PIN } from './attest-pin';
+import { PIR1_PIN, PIR2_MACBOOK_PIN, pinAcceptsBinary } from './attest-pin';
 
 const attest0 = await client.attest(0); // 0 = hint server
 const attest1 = await client.attest(1); // 1 = query server
 
-// 1. Compare each server's binary hash to your build-time pin.
-if (attest0.binarySha256Hex !== PIR1_PIN.binarySha256Hex
-    || attest1.binarySha256Hex !== PIR2_MACBOOK_PIN.binarySha256Hex) {
+// 1. Compare each server's binary hash to your build-time pin (or the
+//    pin's transition build while the operator switches builds).
+if (!pinAcceptsBinary(PIR1_PIN, attest0.binarySha256Hex)
+    || !pinAcceptsBinary(PIR2_MACBOOK_PIN, attest1.binarySha256Hex)) {
   throw new Error('Server is running a different binary than expected');
 }
 

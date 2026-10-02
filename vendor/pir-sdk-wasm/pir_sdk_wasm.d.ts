@@ -709,6 +709,13 @@ export class WasmDpfClient {
      */
     preflightDatabase(db_id: number): Promise<void>;
     /**
+     * Present an operator-issued API key on one server (`serverIndex` ∈
+     * {0, 1}; docs/CREDITS.md "API keys"). Once accepted, that connection
+     * is served unmetered, so skip `enableCredits` for it. Bearer
+     * material: call after [`Self::upgrade_to_secure_channel`].
+     */
+    presentApiKey(server_index: number, key: string): Promise<void>;
+    /**
      * Present credits (docs/CREDITS.md) on one server (`serverIndex` ∈
      * {0, 1}): `kind` 1 is a Cashu token, 2 an ARC payload from
      * [`crate::WasmArcCredential::present`]. Resolves to
@@ -1043,6 +1050,11 @@ export class WasmHarmonyClient {
      */
     preflightDatabase(db_id: number): Promise<void>;
     /**
+     * Present an operator-issued API key on the hint (0) or query (1)
+     * server. See [`WasmDpfClient::present_api_key`].
+     */
+    presentApiKey(server_index: number, key: string): Promise<void>;
+    /**
      * Present credits (docs/CREDITS.md) on the hint (0) or query (1)
      * server; resolves to `{ gasAdded, gasBalance }`. See
      * [`WasmDpfClient::present_credits`].
@@ -1220,6 +1232,11 @@ export class WasmOramClient {
      * Create a new ORAM client. No network I/O happens until `connect`.
      */
     constructor(server_url: string);
+    /**
+     * Present an operator-issued API key on the connection. See
+     * [`WasmDpfClient::present_api_key`].
+     */
+    presentApiKey(key: string): Promise<void>;
     /**
      * Present credits (docs/CREDITS.md) on the connection; resolves to
      * `{ gasAdded, gasBalance }`. See [`WasmDpfClient::present_credits`].
@@ -1979,6 +1996,7 @@ export interface InitOutput {
     readonly wasmdpfclient_new: (a: number, b: number, c: number, d: number) => number;
     readonly wasmdpfclient_onStateChange: (a: number, b: any) => void;
     readonly wasmdpfclient_preflightDatabase: (a: number, b: number) => any;
+    readonly wasmdpfclient_presentApiKey: (a: number, b: number, c: number, d: number) => any;
     readonly wasmdpfclient_presentCredits: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly wasmdpfclient_queryBatch: (a: number, b: any, c: number) => any;
     readonly wasmdpfclient_queryBatchVerified: (a: number, b: any, c: number) => any;
@@ -2019,6 +2037,7 @@ export interface InitOutput {
     readonly wasmharmonyclient_new: (a: number, b: number, c: number, d: number) => number;
     readonly wasmharmonyclient_onStateChange: (a: number, b: any) => void;
     readonly wasmharmonyclient_preflightDatabase: (a: number, b: number) => any;
+    readonly wasmharmonyclient_presentApiKey: (a: number, b: number, c: number, d: number) => any;
     readonly wasmharmonyclient_presentCredits: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly wasmharmonyclient_queryBatch: (a: number, b: any, c: number) => any;
     readonly wasmharmonyclient_queryBatchVerified: (a: number, b: any, c: number) => any;
@@ -2046,6 +2065,7 @@ export interface InitOutput {
     readonly wasmoramclient_installVerifiedDatabaseProof: (a: number, b: number) => [number, number];
     readonly wasmoramclient_isConnected: (a: number) => number;
     readonly wasmoramclient_new: (a: number, b: number) => number;
+    readonly wasmoramclient_presentApiKey: (a: number, b: number, c: number) => any;
     readonly wasmoramclient_presentCredits: (a: number, b: number, c: number, d: number) => any;
     readonly wasmoramclient_queryBatch: (a: number, b: any, c: number) => any;
     readonly wasmoramclient_queryBatchPadded: (a: number, b: any, c: number, d: number) => any;

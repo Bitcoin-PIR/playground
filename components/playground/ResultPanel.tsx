@@ -102,7 +102,9 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
                       ? 'accepted, not charged'
                       : c.state === 'not-enabled'
                         ? 'free (credits not enabled)'
-                        : `error — ${c.error ?? 'unknown'}`}
+                        : c.state === 'api-key'
+                          ? 'API key accepted — this connection is unmetered'
+                          : `error — ${c.error ?? 'unknown'}`}
               </li>
             ))}
           </ul>
