@@ -38,21 +38,17 @@ const EMPTY_WALLET = `// Payments (/docs/sdk/payments): each server says per bac
 const creditProvider = (credits: number) => null;`;
 
 // Neither live server has a TEE (both attest as 'noSevHost'), so nothing
-// hardware-signs their channel keys. Mirrors the structured path
-// (`noTeeLegFailures` in lib/playground-clients.ts). Indented for the
-// `try` block it is pasted into.
-const REQUIRE_OPERATOR_IDENTITY = `// No TEE on either server: the operator-signed identity (REQ_ANNOUNCE)
-  // is what ties each channel key to the operator. Require it, for the
-  // pinned server id and binary, before any credits or query frame.
+// hardware-signs their channel keys. Indented for the `try` block it is
+// pasted into.
+const CHECK_OPERATOR_IDENTITY = `// No TEE on either server: the operator-signed identity (REQ_ANNOUNCE)
+  // is what ties each channel key to the operator.
   const now = BigInt(Math.floor(Date.now() / 1000));
   for (const [i, p, att] of [[0, PIR1_PROVIDER, att0], [1, PIR2_PROVIDER, att1]] as const) {
     const v = await client.announce(i);
     const id = gateOperatorIdentity(v, p.operatorPubkey, att.serverStaticPub, now);
     v.free();
-    if (id.state !== 'verified' || id.serverId !== p.stableServerId
-        || !pinAcceptsBinary(p.serverPin, id.binarySha256Hex ?? '')) {
-      throw new Error(\`server \${i} operator identity: \${id.state} \${id.error ?? ''}\`);
-    }
+    console.log(\`server \${i} operator identity: \${id.state}\`,
+      'signed binary matches the pin:', pinAcceptsBinary(p.serverPin, id.binarySha256Hex ?? ''));
   }`;
 
 const DPF_SNIPPET = `// DPF-PIR — two servers, low-latency, batch scans. Free while the
@@ -78,22 +74,17 @@ const client = new WasmDpfClient(
 try {
   await client.connect();
 
-  // Pinned attestation (each server reports the binary it runs) —
-  // required before sending any query. With no TEE the pin catches
-  // drift from the operator-published build but is not hardware-backed.
-  // pinAcceptsBinary: the pinned build, or the pin's transition build
-  // while the operator switches a node to a new build.
+  // Each server reports the binary it runs; compare it with the pin. With
+  // no TEE the pin catches drift from the operator-published build but is
+  // not hardware-backed. pinAcceptsBinary: the pinned build, or the pin's
+  // transition build while the operator switches a node to a new build.
   const att0 = await client.attest(0);
   const att1 = await client.attest(1);
-  if (!pinAcceptsBinary(PIR1_PROVIDER.serverPin, att0.binarySha256Hex)) {
-    throw new Error('pir1 binary pin mismatch');
-  }
-  if (!pinAcceptsBinary(PIR2_PROVIDER.serverPin, att1.binarySha256Hex)) {
-    throw new Error('pir2 binary pin mismatch');
-  }
+  console.log('pir1 binary matches the pin:', pinAcceptsBinary(PIR1_PROVIDER.serverPin, att0.binarySha256Hex));
+  console.log('pir2 binary matches the pin:', pinAcceptsBinary(PIR2_PROVIDER.serverPin, att1.binarySha256Hex));
   await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);
 
-  ${REQUIRE_OPERATOR_IDENTITY}
+  ${CHECK_OPERATOR_IDENTITY}
 
   // After the sealed channel (presentations are bearer material).
   // 'best-effort' = free while the server has room.
@@ -108,10 +99,10 @@ try {
   const spkHex = addressToScriptPubKey('__ADDRESS__')!;
   const sh = scriptHash(hexToBytes(spkHex));
 
-  // Query + per-bucket Merkle verification in one all-or-nothing call:
-  // it returns only when every result verified against the published
-  // tree tops (not-found results included, as absence proofs).
+  // Query + per-bucket Merkle verification: each result carries its own
+  // verdict (not-found results included, as absence proofs).
   const [result] = await client.queryBatchVerified(sh, 0);
+  console.log('Merkle verified:', result.merkleVerified);
   console.log('balance (sats):', result.totalBalance);
   for (let i = 0; i < result.entryCount; i++) {
     const u = result.getEntry(i);
@@ -150,15 +141,11 @@ try {
   // Same attest + pin + channel upgrade + identity check as DPF.
   const att0 = await client.attest(0);
   const att1 = await client.attest(1);
-  if (!pinAcceptsBinary(PIR1_PROVIDER.serverPin, att0.binarySha256Hex)) {
-    throw new Error('pir1 binary pin mismatch');
-  }
-  if (!pinAcceptsBinary(PIR2_PROVIDER.serverPin, att1.binarySha256Hex)) {
-    throw new Error('pir2 binary pin mismatch');
-  }
+  console.log('pir1 binary matches the pin:', pinAcceptsBinary(PIR1_PROVIDER.serverPin, att0.binarySha256Hex));
+  console.log('pir2 binary matches the pin:', pinAcceptsBinary(PIR2_PROVIDER.serverPin, att1.binarySha256Hex));
   await client.upgradeToSecureChannel(att0.serverStaticPub, att1.serverStaticPub);
 
-  ${REQUIRE_OPERATOR_IDENTITY}
+  ${CHECK_OPERATOR_IDENTITY}
 
   console.log('credits hint:', await client.enableCredits(0, creditProvider));
   console.log('credits query:', await client.enableCredits(1, creditProvider));
@@ -170,9 +157,10 @@ try {
   const sh = scriptHash(hexToBytes(spkHex));
 
   // Fetches the hint set on first use, then queries and verifies the
-  // per-bucket Merkle proofs — all or nothing. Persist \`saveHints()\` to
-  // IndexedDB to keep the hint set across page reloads.
+  // per-bucket Merkle proofs; each result carries its own verdict. Persist
+  // \`saveHints()\` to IndexedDB to keep the hint set across page reloads.
   const [result] = await client.queryBatchVerified(sh, 0);
+  console.log('Merkle verified:', result.merkleVerified);
   console.log('balance (sats):', result.totalBalance);
   for (let i = 0; i < result.entryCount; i++) {
     const u = result.getEntry(i);
@@ -200,8 +188,9 @@ const client = new OnionPirWebClient({
   serverUrl: PIR1_PROVIDER.endpoint,
   // Attestation pin + operator-signed identity of pir1.
   expectedServerPin: PIR1_PROVIDER.serverPin,
-  expectedServerId: PIR1_PROVIDER.stableServerId,
   pinnedOperatorPubkey: PIR1_PROVIDER.operatorPubkey,
+  onAttestation: (status) => console.log('attestation:', status.state),
+  onOperatorIdentity: (status) => console.log('operator identity:', status.state),
   creditProvider,
   onCredits: (status) => console.log('credits:', status.state),
 });
@@ -211,21 +200,13 @@ try {
   const spkHex = addressToScriptPubKey('__ADDRESS__')!;
   const sh = scriptHash(hexToBytes(spkHex));
 
-  const results = await client.queryBatch([sh]);
-
-  // SOUNDNESS: OnionPIR's queryBatch does NOT verify the per-bin
-  // Merkle proof on its own — call verifyMerkleBatch explicitly and
-  // refuse the result unless every verdict passes.
-  const nonNull = results.filter((r): r is NonNullable<typeof r> => !!r);
-  const verdicts = await client.verifyMerkleBatch(nonNull);
-  if (verdicts.length === 0 || !verdicts.every(Boolean)) {
-    throw new Error('Merkle proof FAILED or missing — untrusted result');
-  }
-
-  // A not-found lookup still returns a result (its absence proof).
-  const [result] = results;
+  // queryBatch verifies the per-bin Merkle proofs before it returns; each
+  // result carries its own verdict. A not-found lookup still returns a
+  // result (its absence proof).
+  const [result] = await client.queryBatch([sh]);
+  console.log('Merkle verified:', result?.merkleVerified === true);
   if (!result || result.entries.length === 0) {
-    console.log('no UTXOs (verified absent)');
+    console.log('no UTXOs');
   } else {
     console.log('balance (sats):', result.totalSats);
     for (const u of result.entries) {
@@ -260,15 +241,12 @@ if (!ORAM_PROVIDER) throw new Error(ORAM_PAUSED_MESSAGE);
 
 const client = new OramPirClientAdapter({
   serverUrl: ORAM_PROVIDER.endpoint,
-  // Fail closed: AMD chain + pinned binary/MEASUREMENT, the operator-
-  // signed identity of the ORAM host, and a database proof checked here
-  // must all pass before any lookup.
-  strictVerification: true,
+  // Checked on connect and reported below: AMD chain + pinned
+  // binary/MEASUREMENT, the operator-signed identity of the ORAM host,
+  // and the database proof.
   expectedArkFingerprint: ORAM_PROVIDER.expectedArkFingerprint,
   expectedServerPin: ORAM_PROVIDER.serverPin,
-  expectedServerId: ORAM_PROVIDER.stableServerId,
   pinnedOperatorPubkey: ORAM_PROVIDER.operatorPubkey,
-  verifyOperatorIdentity: true,
   databaseProofPins: PRODUCTION_ORAM_DB_PROOF_V2_PINS,
   // The production request shape — never choose your own.
   batchPlanner: PRODUCTION_ORAM_BATCH_PLANNER,

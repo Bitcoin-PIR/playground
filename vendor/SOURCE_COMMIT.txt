@@ -1,1 +1,1 @@
-BitcoinPIR @ 84d35d8920a98a55bb04ceedf8e1cd8ac89301de
+BitcoinPIR @ 96a365f3beddef4cd94d45b98189044723d5052b

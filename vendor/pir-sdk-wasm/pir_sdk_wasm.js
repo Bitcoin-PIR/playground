@@ -1029,10 +1029,8 @@ export class WasmDatabaseCatalog {
      * commitments? `false` if the database is absent or carries no
      * Merkle section.
      *
-     * The JS-side callers check this before enabling proof-backed queries;
-     * the native atomic verifier performs the same check internally. The
-     * flag is also useful for UI surfaces that show a "verified" badge only
-     * when verification actually ran.
+     * Queries on a database without commitments come back with
+     * `merkleVerified = false`.
      * @param {number} db_id
      * @returns {boolean}
      */
@@ -1436,15 +1434,6 @@ export class WasmDpfClient {
         return ret;
     }
     /**
-     * Connect one provider without selecting or dialing its peer.
-     * @param {number} server_index
-     * @returns {Promise<void>}
-     */
-    connectServer(server_index) {
-        const ret = wasm.wasmdpfclient_connectServer(this.__wbg_ptr, server_index);
-        return ret;
-    }
-    /**
      * Close both WebSocket connections. After this the client returns
      * `isConnected === false` and `connect` must be called before the
      * next query.
@@ -1452,14 +1441,6 @@ export class WasmDpfClient {
      */
     disconnect() {
         const ret = wasm.wasmdpfclient_disconnect(this.__wbg_ptr);
-        return ret;
-    }
-    /**
-     * @param {number} server_index
-     * @returns {Promise<void>}
-     */
-    disconnectServer(server_index) {
-        const ret = wasm.wasmdpfclient_disconnectServer(this.__wbg_ptr, server_index);
         return ret;
     }
     /**
@@ -1492,18 +1473,9 @@ export class WasmDpfClient {
         return ret;
     }
     /**
-     * Fetch and install-or-compare one staged provider's catalog.
-     * @param {number} server_index
-     * @returns {Promise<WasmDatabaseCatalog>}
-     */
-    fetchCatalogFromServer(server_index) {
-        const ret = wasm.wasmdpfclient_fetchCatalogFromServer(this.__wbg_ptr, server_index);
-        return ret;
-    }
-    /**
-     * Consume and install the exact proof handle returned by
-     * `verifyDatabaseProof`. JavaScript must perform its production-pin
-     * comparison before transferring ownership here.
+     * Install the roots of a proof returned by `verifyDatabaseProof` (after
+     * any pin comparison): queries then check the Merkle tree-tops against
+     * them.
      * @param {WasmDatabaseProof} proof
      */
     installVerifiedDatabaseProof(proof) {
@@ -1521,17 +1493,6 @@ export class WasmDpfClient {
     get isConnected() {
         const ret = wasm.wasmdpfclient_isConnected(this.__wbg_ptr);
         return ret !== 0;
-    }
-    /**
-     * @param {number} server_index
-     * @returns {boolean}
-     */
-    isServerConnected(server_index) {
-        const ret = wasm.wasmdpfclient_isServerConnected(this.__wbg_ptr, server_index);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return ret[0] !== 0;
     }
     /**
      * Create a new DPF client. No network I/O happens until `connect` is
@@ -1567,8 +1528,8 @@ export class WasmDpfClient {
         wasm.wasmdpfclient_onStateChange(this.__wbg_ptr, cb);
     }
     /**
-     * Fetch and authenticate the bucket Merkle tree-tops before any private
-     * address query is allowed to run.
+     * Check the bucket Merkle tree-tops against the installed roots now
+     * instead of at the first query.
      * @param {number} db_id
      * @returns {Promise<void>}
      */
@@ -1625,19 +1586,11 @@ export class WasmDpfClient {
         return ret;
     }
     /**
-     * Release-safe inspector batch query. Native Rust retains every raw
-     * INDEX/CHUNK bin, re-derives coordinates and decoded payloads from the
-     * exact input order, and completes Merkle verification before this
-     * promise resolves. A single failed slot rejects the whole batch; JS
-     * never receives an unverified entry or an independently forgeable JSON
-     * proof object.
-     *
-     * Returns a JS `Array` of length `N` (the input scripthash count).
-     * Every slot is a non-null [`WasmQueryResult`] — not-found queries
-     * are synthesised as empty inspector-populated results so the
-     * absence-proof bins are preserved for verification.
-     * Empty input or a database without bucket-Merkle commitments fails
-     * before the private query phase.
+     * Query with inspector state: like `queryBatch`, verified the same way,
+     * but every slot is a non-null [`WasmQueryResult`] carrying the bins
+     * the query probed (`indexBins`, `chunkBins`, `matchedIndexIdx`). A
+     * not-found query is an empty result holding its two INDEX bins. Each
+     * result's `merkleVerified` is its own verdict.
      *
      * 🔒 Padding invariants are preserved (K=75 INDEX / K_CHUNK=80
      * CHUNK groups), including when most queries are not-found — the
@@ -1689,27 +1642,6 @@ export class WasmDpfClient {
         wasm.wasmdpfclient_setMetricsRecorder(this.__wbg_ptr, metrics.__wbg_ptr);
     }
     /**
-     * Select whether every query must be bound to proof-verified database
-     * roots installed during the current connection.
-     * @param {boolean} require_verified
-     */
-    setRequireVerifiedDatabaseRoots(require_verified) {
-        wasm.wasmdpfclient_setRequireVerifiedDatabaseRoots(this.__wbg_ptr, require_verified);
-    }
-    /**
-     * Set one staged provider URL before that leg is connected.
-     * @param {number} server_index
-     * @param {string} url
-     */
-    setServerUrl(server_index, url) {
-        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmdpfclient_setServerUrl(this.__wbg_ptr, server_index, ptr0, len0);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
-    }
-    /**
      * End-to-end sync: fetch catalog, plan, execute all steps, merge
      * deltas. Returns a [`WasmSyncResult`] whose `results[i]`
      * corresponds to the i-th script hash in the packed input.
@@ -1747,19 +1679,6 @@ export class WasmDpfClient {
      */
     syncWithProgress(script_hashes, last_height, progress) {
         const ret = wasm.wasmdpfclient_syncWithProgress(this.__wbg_ptr, script_hashes, isLikeNone(last_height) ? 0x100000001 : (last_height) >>> 0, progress);
-        return ret;
-    }
-    /**
-     * Upgrade one staged provider using only that leg's attestation-bound
-     * ephemeral seed. No peer transport is inspected or modified.
-     * @param {number} server_index
-     * @param {Uint8Array} server_static_pub
-     * @returns {Promise<void>}
-     */
-    upgradeServerToSecureChannel(server_index, server_static_pub) {
-        const ptr0 = passArray8ToWasm0(server_static_pub, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmdpfclient_upgradeServerToSecureChannel(this.__wbg_ptr, server_index, ptr0, len0);
         return ret;
     }
     /**
@@ -1817,25 +1736,6 @@ export class WasmDpfClient {
         var ptr2 = isLikeNone(allowed_builder_git_commit) ? 0 : passStringToWasm0(allowed_builder_git_commit, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         var len2 = WASM_VECTOR_LEN;
         const ret = wasm.wasmdpfclient_verifyDatabaseProof(this.__wbg_ptr, db_id, ptr0, len0, ptr1, len1, ptr2, len2);
-        return ret;
-    }
-    /**
-     * Verify the proof returned by one exact staged provider.
-     * @param {number} server_index
-     * @param {number} db_id
-     * @param {string | null} [expected_params_hash_hex]
-     * @param {string | null} [allowed_builder_binary_sha256_hex]
-     * @param {string | null} [allowed_builder_git_commit]
-     * @returns {Promise<WasmDatabaseProof>}
-     */
-    verifyDatabaseProofFromServer(server_index, db_id, expected_params_hash_hex, allowed_builder_binary_sha256_hex, allowed_builder_git_commit) {
-        var ptr0 = isLikeNone(expected_params_hash_hex) ? 0 : passStringToWasm0(expected_params_hash_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        var len0 = WASM_VECTOR_LEN;
-        var ptr1 = isLikeNone(allowed_builder_binary_sha256_hex) ? 0 : passStringToWasm0(allowed_builder_binary_sha256_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        var len1 = WASM_VECTOR_LEN;
-        var ptr2 = isLikeNone(allowed_builder_git_commit) ? 0 : passStringToWasm0(allowed_builder_git_commit, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        var len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmdpfclient_verifyDatabaseProofFromServer(this.__wbg_ptr, server_index, db_id, ptr0, len0, ptr1, len1, ptr2, len2);
         return ret;
     }
 }
@@ -1928,14 +1828,6 @@ export class WasmHarmonyClient {
         return ret;
     }
     /**
-     * @param {number} provider_index
-     * @returns {Promise<void>}
-     */
-    connectProvider(provider_index) {
-        const ret = wasm.wasmharmonyclient_connectProvider(this.__wbg_ptr, provider_index);
-        return ret;
-    }
-    /**
      * Get the currently-loaded `db_id`, or `null` if no hints are
      * loaded. See [`HarmonyClient::db_id`] for semantics.
      * @returns {number | undefined}
@@ -1950,14 +1842,6 @@ export class WasmHarmonyClient {
      */
     disconnect() {
         const ret = wasm.wasmharmonyclient_disconnect(this.__wbg_ptr);
-        return ret;
-    }
-    /**
-     * @param {number} provider_index
-     * @returns {Promise<void>}
-     */
-    disconnectProvider(provider_index) {
-        const ret = wasm.wasmharmonyclient_disconnectProvider(this.__wbg_ptr, provider_index);
         return ret;
     }
     /**
@@ -1998,17 +1882,8 @@ export class WasmHarmonyClient {
         return ret;
     }
     /**
-     * @param {number} provider_index
-     * @returns {Promise<WasmDatabaseCatalog>}
-     */
-    fetchCatalogFromProvider(provider_index) {
-        const ret = wasm.wasmharmonyclient_fetchCatalogFromProvider(this.__wbg_ptr, provider_index);
-        return ret;
-    }
-    /**
-     * Pre-fetch every main and Merkle-sibling hint group needed to restore a
-     * paid hint entitlement across page reloads. Requires proof-verified tree
-     * tops to have been installed through `preflightDatabase` first.
+     * Pre-fetch every main and Merkle-sibling hint group, so the set can be
+     * cached and no later query downloads hints.
      * @param {WasmDatabaseCatalog} catalog
      * @param {number} db_id
      * @param {Function} progress
@@ -2068,8 +1943,7 @@ export class WasmHarmonyClient {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * True only when every main and authenticated sibling hint group for the
-     * proof-verified database is present in memory.
+     * Whether hints for `dbId` are loaded.
      * @param {WasmDatabaseCatalog} catalog
      * @param {number} db_id
      * @returns {boolean}
@@ -2083,8 +1957,9 @@ export class WasmHarmonyClient {
         return ret[0] !== 0;
     }
     /**
-     * Consume and install the exact proof handle returned by
-     * `verifyDatabaseProof` after the browser's production-pin comparison.
+     * Install the roots of a proof returned by `verifyDatabaseProof` (after
+     * any pin comparison): queries then check the Merkle tree-tops against
+     * them.
      * @param {WasmDatabaseProof} proof
      */
     installVerifiedDatabaseProof(proof) {
@@ -2104,20 +1979,7 @@ export class WasmHarmonyClient {
         return ret !== 0;
     }
     /**
-     * @param {number} provider_index
-     * @returns {boolean}
-     */
-    isProviderConnected(provider_index) {
-        const ret = wasm.wasmharmonyclient_isProviderConnected(this.__wbg_ptr, provider_index);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return ret[0] !== 0;
-    }
-    /**
-     * Restore only a complete paid hint resource. The native client requires
-     * proof-verified tree tops for `dbId` and rejects main-only or malformed
-     * sibling state, clearing the partial in-memory bundle on failure.
+     * Same as `loadHints` (kept for existing callers).
      * @param {Uint8Array} bytes
      * @param {WasmDatabaseCatalog} catalog
      * @param {number} db_id
@@ -2198,8 +2060,8 @@ export class WasmHarmonyClient {
         wasm.wasmharmonyclient_onStateChange(this.__wbg_ptr, cb);
     }
     /**
-     * Fetch and authenticate the bucket Merkle tree-tops before any private
-     * address query is allowed to run.
+     * Check the bucket Merkle tree-tops against the installed roots now
+     * instead of at the first query.
      * @param {number} db_id
      * @returns {Promise<void>}
      */
@@ -2247,11 +2109,8 @@ export class WasmHarmonyClient {
         return ret;
     }
     /**
-     * Release-safe inspector batch query. See
-     * [`WasmDpfClient::query_batch_verified`] for the all-or-nothing
-     * verification and JS-boundary contract.
-     * Empty input or a database without bucket-Merkle commitments fails
-     * before the private query phase.
+     * Query with inspector state. See
+     * [`WasmDpfClient::query_batch_verified`].
      *
      * 🔒 Padding invariants are preserved (K=75 INDEX / K_CHUNK=80
      * CHUNK groups) — padding lives in the native `HarmonyClient` query
@@ -2341,18 +2200,6 @@ export class WasmHarmonyClient {
         wasm.wasmharmonyclient_setMetricsRecorder(this.__wbg_ptr, metrics.__wbg_ptr);
     }
     /**
-     * @param {number} provider_index
-     * @param {string} url
-     */
-    setProviderUrl(provider_index, url) {
-        const ptr0 = passStringToWasm0(url, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmharmonyclient_setProviderUrl(this.__wbg_ptr, provider_index, ptr0, len0);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
-    }
-    /**
      * Select the PRP backend.
      *
      * Accepts [`PRP_HMR12`] or [`PRP_FASTPRP`].
@@ -2366,14 +2213,6 @@ export class WasmHarmonyClient {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
-    }
-    /**
-     * Select whether every query must be bound to proof-verified database
-     * roots installed during the current connection.
-     * @param {boolean} require_verified
-     */
-    setRequireVerifiedDatabaseRoots(require_verified) {
-        wasm.wasmharmonyclient_setRequireVerifiedDatabaseRoots(this.__wbg_ptr, require_verified);
     }
     /**
      * End-to-end sync. See [`WasmDpfClient::sync`] for argument
@@ -2399,17 +2238,6 @@ export class WasmHarmonyClient {
      */
     syncWithProgress(script_hashes, last_height, progress) {
         const ret = wasm.wasmharmonyclient_syncWithProgress(this.__wbg_ptr, script_hashes, isLikeNone(last_height) ? 0x100000001 : (last_height) >>> 0, progress);
-        return ret;
-    }
-    /**
-     * @param {number} provider_index
-     * @param {Uint8Array} server_static_pub
-     * @returns {Promise<void>}
-     */
-    upgradeProviderToSecureChannel(provider_index, server_static_pub) {
-        const ptr0 = passArray8ToWasm0(server_static_pub, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmharmonyclient_upgradeProviderToSecureChannel(this.__wbg_ptr, provider_index, ptr0, len0);
         return ret;
     }
     /**
@@ -2448,24 +2276,6 @@ export class WasmHarmonyClient {
         var ptr2 = isLikeNone(allowed_builder_git_commit) ? 0 : passStringToWasm0(allowed_builder_git_commit, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         var len2 = WASM_VECTOR_LEN;
         const ret = wasm.wasmharmonyclient_verifyDatabaseProof(this.__wbg_ptr, db_id, ptr0, len0, ptr1, len1, ptr2, len2);
-        return ret;
-    }
-    /**
-     * @param {number} provider_index
-     * @param {number} db_id
-     * @param {string | null} [expected_params_hash_hex]
-     * @param {string | null} [allowed_builder_binary_sha256_hex]
-     * @param {string | null} [allowed_builder_git_commit]
-     * @returns {Promise<WasmDatabaseProof>}
-     */
-    verifyDatabaseProofFromProvider(provider_index, db_id, expected_params_hash_hex, allowed_builder_binary_sha256_hex, allowed_builder_git_commit) {
-        var ptr0 = isLikeNone(expected_params_hash_hex) ? 0 : passStringToWasm0(expected_params_hash_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        var len0 = WASM_VECTOR_LEN;
-        var ptr1 = isLikeNone(allowed_builder_binary_sha256_hex) ? 0 : passStringToWasm0(allowed_builder_binary_sha256_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        var len1 = WASM_VECTOR_LEN;
-        var ptr2 = isLikeNone(allowed_builder_git_commit) ? 0 : passStringToWasm0(allowed_builder_git_commit, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        var len2 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmharmonyclient_verifyDatabaseProofFromProvider(this.__wbg_ptr, provider_index, db_id, ptr0, len0, ptr1, len1, ptr2, len2);
         return ret;
     }
 }
@@ -2663,13 +2473,6 @@ export class WasmOramClient {
     setMetricsRecorder(metrics) {
         _assertClass(metrics, WasmAtomicMetrics);
         wasm.wasmoramclient_setMetricsRecorder(this.__wbg_ptr, metrics.__wbg_ptr);
-    }
-    /**
-     * Require proof-root installation before ORAM query/admission.
-     * @param {boolean} require_verified
-     */
-    setRequireVerifiedDatabaseRoots(require_verified) {
-        wasm.wasmoramclient_setRequireVerifiedDatabaseRoots(this.__wbg_ptr, require_verified);
     }
     /**
      * Wrap the single server connection with the encrypted-channel transport.
@@ -2875,11 +2678,7 @@ export class WasmQueryResult {
         return ret >>> 0;
     }
     /**
-     * Create an unverified result from JSON.
-     *
-     * A caller-supplied `merkleVerified` property is ignored and the result
-     * is always marked `false`. JSON import is a data-compatibility API, not
-     * a proof or release boundary.
+     * Create a result from JSON (the `toJson` shape).
      * @param {any} json
      * @returns {WasmQueryResult}
      */
@@ -2903,8 +2702,7 @@ export class WasmQueryResult {
      * Inspector state: every INDEX cuckoo bin probed for this query,
      * as a JSON array of `{pbcGroup, binIndex, binContent}` objects.
      *
-     * Only non-empty for `QueryResult`s produced by the inspector path
-     * (e.g. `WasmDpfClient.queryBatchVerified`). Populated for found,
+     * Only non-empty for results of `queryBatchVerified`. Populated for found,
      * not-found, and whale alike — the item-count symmetry invariant
      * guarantees this array always has `INDEX_CUCKOO_NUM_HASHES = 2`
      * entries for an inspector-path result.
@@ -2933,14 +2731,7 @@ export class WasmQueryResult {
         return ret;
     }
     /**
-     * Whether a native query/sync path established a positive per-bucket
-     * Merkle release verdict (or established that commitments are N/A).
-     *
-     * `WasmQueryResult::new()` and `fromJson()` always return `false`; only
-     * crate-internal native SDK paths can set the private provenance marker.
-     * A `false` value means unauthenticated/unreleased (including unverified,
-     * tainted, or failed), so callers must never interpret it as merely an
-     * attempted failure.
+     * Whether the query's Merkle proofs were checked and passed.
      * @returns {boolean}
      */
     get merkleVerified() {
@@ -2948,7 +2739,7 @@ export class WasmQueryResult {
         return ret !== 0;
     }
     /**
-     * Create an empty, unverified result.
+     * Create an empty result.
      */
     constructor() {
         const ret = wasm.wasmqueryresult_new();
@@ -2967,8 +2758,8 @@ export class WasmQueryResult {
      * `entries` already hold the canonical state — there is no
      * second-layer merge to feed.
      *
-     * Populated natively by the release-safe verified inspector query
-     * (when `db_info.kind.is_delta()`) and surfaced here as a
+     * Populated natively by the query (when `db_info.kind.is_delta()`) and
+     * surfaced here as a
      * `Uint8Array`. This getter is the only way the web client can
      * obtain the bytes — `toJson()` emits them as a hex string so that
      * persisted results also carry the delta payload across reloads.
@@ -2981,10 +2772,9 @@ export class WasmQueryResult {
     /**
      * Convert to JSON.
      *
-     * The emitted object is accepted by [`fromJson`] as a data round-trip,
+     * The emitted object is accepted by [`fromJson`] as a round-trip,
      * including optional inspector fields (`indexBins`, `chunkBins`,
-     * `matchedIndexIdx`). It is deliberately not accepted as proof input by
-     * DPF/Harmony clients; a deserialized result has no release authority.
+     * `matchedIndexIdx`).
      * @returns {any}
      */
     toJson() {
@@ -3102,17 +2892,6 @@ export class WasmStandaloneSecureChannelV1 {
         var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
         wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
         return v2;
-    }
-    /**
-     * Non-secret exporter used by service authorization transcript binding.
-     * @returns {Uint8Array}
-     */
-    serviceAuthorizationExporterV1() {
-        const ret = wasm.wasmstandalonesecurechannelv1_serviceAuthorizationExporterV1(this.__wbg_ptr);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
     }
     /**
      * Verify a same-socket `RESP_ATTEST` with the nonce bound to our hidden
@@ -3239,8 +3018,8 @@ export class WasmSyncResult {
      * the DB publishes commitments).
      *
      * Mirrors the `results: Vec<Option<QueryResult>>` shape of the
-     * underlying sync: `None` = verified absent, `Some(qr)` with
-     * `merkleVerified = false` = untrusted/tainted result.
+     * underlying sync: `None` = not found, `Some(qr)` with
+     * `merkleVerified = false` = unverified or failed result.
      * @param {number} index
      * @returns {WasmQueryResult | undefined}
      */
@@ -3271,10 +3050,7 @@ export class WasmSyncResult {
         return ret >>> 0;
     }
     /**
-     * Convert the full sync result to a data-only plain JSON object.
-     * Verification provenance cannot survive conversion to caller-mutable
-     * JSON, so every `merkleVerified` property is false. Use `getResult()`
-     * to retain the opaque native provenance marker.
+     * Convert the full sync result to a plain JSON object.
      *
      * Shape:
      * ```json
@@ -3282,7 +3058,7 @@ export class WasmSyncResult {
      *   "results": [
      *     null,
      *     { "entries": [...], "isWhale": false,
-     *       "totalBalance": 0, "merkleVerified": false }
+     *       "totalBalance": 0, "merkleVerified": true }
      *   ],
      *   "syncedHeight": 900000,
      *   "wasFreshSync": true
@@ -3612,9 +3388,8 @@ export function initTracingSubscriber() {
  * * `delta_raw` - Raw delta chunk data bytes
  *
  * # Returns
- * A new unverified WasmQueryResult with the delta applied. The caller supplies
- * `delta_raw`, so merging always drops snapshot verification authority; the
- * merged payload requires a fresh native verification before release.
+ * A new WasmQueryResult with the delta applied. It keeps the snapshot's
+ * `merkleVerified`; the delta's own verdict is the caller's to combine.
  * @param {WasmQueryResult} snapshot
  * @param {Uint8Array} delta_raw
  * @returns {WasmQueryResult}
@@ -3760,46 +3535,6 @@ export function verifyBucketMerkleItem(bin_index, bin_content, pbc_group, siblin
     _assertClass(tree_tops, WasmBucketMerkleTreeTops);
     const ret = wasm.verifyBucketMerkleItem(bin_index, ptr0, len0, pbc_group, ptr1, len1, tree_tops.__wbg_ptr);
     return ret !== 0;
-}
-
-/**
- * Verify a complete, length-prefixed `RESP_DB_PROOF` frame without owning a
- * WebSocket or PIR client.
- *
- * This is the authoritative verifier for transports that remain in
- * JavaScript, notably the standalone OnionPIR browser client.  `responseFrame`
- * must be exactly one record in the shape returned by that client's
- * `ManagedWebSocket.sendRaw`: `[u32 payload_len LE][opcode][body...]`.
- * The outer length, response opcode, requested database ID, catalog anchors,
- * attested-builder proof, and supplied policy pins are all checked before an
- * opaque [`WasmDatabaseProof`] is returned.
- *
- * The function is stateless and does not install roots.  JavaScript must
- * compare every exposed field with its production pin and then explicitly
- * transfer the same handle into its OnionPIR session root store.
- * @param {Uint8Array} response_frame
- * @param {WasmDatabaseCatalog} catalog
- * @param {number} expected_db_id
- * @param {string | null} [expected_params_hash_hex]
- * @param {string | null} [allowed_builder_binary_sha256_hex]
- * @param {string | null} [allowed_builder_git_commit]
- * @returns {WasmDatabaseProof}
- */
-export function verifyDatabaseProofResponse(response_frame, catalog, expected_db_id, expected_params_hash_hex, allowed_builder_binary_sha256_hex, allowed_builder_git_commit) {
-    const ptr0 = passArray8ToWasm0(response_frame, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    _assertClass(catalog, WasmDatabaseCatalog);
-    var ptr1 = isLikeNone(expected_params_hash_hex) ? 0 : passStringToWasm0(expected_params_hash_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    var len1 = WASM_VECTOR_LEN;
-    var ptr2 = isLikeNone(allowed_builder_binary_sha256_hex) ? 0 : passStringToWasm0(allowed_builder_binary_sha256_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    var len2 = WASM_VECTOR_LEN;
-    var ptr3 = isLikeNone(allowed_builder_git_commit) ? 0 : passStringToWasm0(allowed_builder_git_commit, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    var len3 = WASM_VECTOR_LEN;
-    const ret = wasm.verifyDatabaseProofResponse(ptr0, len0, catalog.__wbg_ptr, expected_db_id, ptr1, len1, ptr2, len2, ptr3, len3);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
-    }
-    return WasmDatabaseProof.__wrap(ret[0]);
 }
 
 /**
@@ -4362,27 +4097,27 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 482, function: Function { arguments: [Externref], shim_idx: 483, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 428, function: Function { arguments: [Externref], shim_idx: 429, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h490263039c0c107c, wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 659, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 660, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 605, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 606, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 659, function: Function { arguments: [NamedExternref("Event")], shim_idx: 660, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 605, function: Function { arguments: [NamedExternref("Event")], shim_idx: 606, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_2);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 659, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 660, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 605, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 606, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_3);
             return ret;
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 659, function: Function { arguments: [], shim_idx: 662, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 605, function: Function { arguments: [], shim_idx: 608, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__hc39032372d75848d);
             return ret;
         },

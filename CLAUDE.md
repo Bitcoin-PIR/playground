@@ -66,7 +66,6 @@ lib/
   runner/                 in-browser editable code runner (see Recent history)
     module-map.ts         require() shim → same live SDK bindings as above
     run-user-code.ts      Sucrase transpile + new Function execute (in-browser)
-    safety-lint.ts        non-blocking attest/Merkle heuristic warnings
     ambient-dts.ts        Monaco IntelliSense lib for the SDK modules
   explorer/
     frame-tap.ts          window.WebSocket monkey-patch + opcode classifier
@@ -152,7 +151,7 @@ Source of truth: CLAUDE.md in the main `Bitcoin-PIR/Bitcoin-PIR` repo. Mirror he
 
 The VPSBG SEV-SNP pir2 that served DPF/HarmonyPIR/ORAM was retired on 2026-10-02. Since 2026-10-03 `wss://weikeng2.bitcoinpir.org` is a new VPSBG host (AMD Milan) that serves **Direct ORAM only**: `PIR2_TIER3_PIN` pins it (MEASUREMENT + binary), `ORAM_PROVIDER` carries it with the Milan ARK (`AMD_MILAN_ARK_FINGERPRINT`), and the adapters hold its reports to the Milan TCB floor. `ORAM_PAUSED_MESSAGE` is only shown if `ORAM_PROVIDER` is `null` again.
 
-Pins live in `vendor/bitcoinpir-web/attest-pin.ts` (never copy the values into prose). The two servers run **different** builds (pir1 Linux, pir2 macOS arm64), so `PIR1_PIN` and `PIR2_MACBOOK_PIN` differ. Each server's `REQ_ANNOUNCE` identity is endorsed by **its own** operator key: gate the "verified operator" badge on `operatorIdentity.state === 'verified'` against `PIR1_PROVIDER.operatorPubkey` / `PIR2_PROVIDER.operatorPubkey` (`vendor/bitcoinpir-web/production-providers.ts`) plus the provider's `stableServerId` — never on `chainVerified` alone (a MITM can self-sign a consistent bundle). The legacy single `PIR_OPERATOR_PUBKEY` no longer matches pir2. With no TEE on either server, the structured DPF/HarmonyPIR path ("Run query") refuses to query unless every `noSevHost` leg has a verified identity whose signed binary matches the pin (`noTeeLegFailures` in `lib/playground-clients.ts`, mirroring upstream strict mode); the DPF/HarmonyPIR snippets do the same check.
+Pins live in `vendor/bitcoinpir-web/attest-pin.ts` (never copy the values into prose). The two servers run **different** builds (pir1 Linux, pir2 macOS arm64), so `PIR1_PIN` and `PIR2_MACBOOK_PIN` differ. Each server's `REQ_ANNOUNCE` identity is endorsed by **its own** operator key: gate the "verified operator" badge on `operatorIdentity.state === 'verified'` against `PIR1_PROVIDER.operatorPubkey` / `PIR2_PROVIDER.operatorPubkey` (`vendor/bitcoinpir-web/production-providers.ts`) — never on `chainVerified` alone (a MITM can self-sign a consistent bundle). Like upstream, every check verifies and reports: the structured path and the snippets show the pin, identity, Merkle and database-proof verdicts and query anyway.
 
 Credits (main repo `docs/CREDITS.md`; site doc `content/docs/sdk/payments.mdx`): a server refuses metered frames it charges for until the connection is funded (`enableCredits` after the sealed channel). The playground has no wallet yet — its credit provider is empty, so OnionPIR ends in a "Payment required" result; DPF and HarmonyPIR are free while the servers have room (a busy free lane ends in "Server busy"), and DPF is the default backend. The servers also accept operator API keys (opcode `0x13`, unmetered connection); the playground deliberately has no UI for them. Buying in the browser from this origin needs `sdk.bitcoinpir.org` in the issuer's `cors_origins`.
 
@@ -178,6 +177,12 @@ npm run copy-monaco             # self-host Monaco assets (auto on predev/prebui
 Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
+
+## Recent history (2026-10-10) — verify-and-report re-vendor
+
+Re-vendored BitcoinPIR `96a365f3` (web/src + wasm, r10 wasm recipe): upstream dropped strict mode (#392–#395) and the SDK's all-or-nothing verifier (#394). `strict-verification.ts`, `strict-result-release.ts`, `trusted-time.ts` and `query-inspector-sanitize.ts` are gone; `verification.ts` is new; `ProductionProviderPin.stableServerId` and the `strictVerification` / `expectedServerId` options no longer exist.
+- **Query layer** (`lib/playground-clients.ts`): no refusal gates (`noTeeLegFailures` and the unsealed-channel throw are gone); the channel is upgraded whenever both servers present a key, as upstream `attestPair` does. `merkleVerified` comes from each result (`queryBatchVerified` and OnionPIR `queryBatch` both verify inline and report per result; OnionPIR has no `verifyMerkleBatch` any more).
+- **Snippets / docs**: pin and identity checks log their verdicts instead of throwing; the ORAM config drops `strictVerification`, `expectedServerId`, `verifyOperatorIdentity`. `lib/runner/safety-lint.ts` and its amber banner are deleted.
 
 ## Recent history (2026-10-03) — Direct ORAM back on a Milan TEE host
 

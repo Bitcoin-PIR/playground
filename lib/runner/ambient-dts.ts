@@ -35,6 +35,8 @@ declare module 'pir-sdk-wasm' {
     readonly entryCount: number;
     readonly totalBalance: bigint;
     readonly isWhale: boolean;
+    /** This result's own Merkle verdict (not-found results: the absence proof's). */
+    readonly merkleVerified: boolean;
     /** UTXO at index as JSON: { txid, vout, amountSats }. */
     getEntry(index: number): any;
     toJson(): any;
@@ -90,10 +92,9 @@ declare module 'pir-sdk-wasm' {
 
 declare module 'bitcoin-pir-web' {
   export interface UtxoEntry { txid: Uint8Array; vout: number; amount: number | bigint; }
-  export interface QueryResult { totalSats: bigint; entries: UtxoEntry[]; isWhale?: boolean; }
+  export interface QueryResult { totalSats: bigint; entries: UtxoEntry[]; isWhale?: boolean; merkleVerified?: boolean; }
   export interface ProductionProviderPin {
     endpoint: string;
-    stableServerId: string;
     serverPin: { binarySha256Hex?: string; transitionBinarySha256Hex?: string; measurementHex?: string };
     operatorPubkey: Uint8Array;
     expectedArkFingerprint: Uint8Array | null;
@@ -124,12 +125,9 @@ declare module 'bitcoin-pir-web' {
   export class OramPirClientAdapter {
     constructor(config: {
       serverUrl: string;
-      strictVerification?: boolean;
       expectedArkFingerprint?: Uint8Array | null;
       expectedServerPin?: unknown;
-      expectedServerId?: string;
       pinnedOperatorPubkey?: Uint8Array;
-      verifyOperatorIdentity?: boolean;
       databaseProofPins?: unknown[];
       batchPlanner?: Readonly<Record<string, number>>;
       creditProvider?: (credits: number) => unknown;
@@ -188,20 +186,21 @@ declare module 'bitcoin-pir-web/attest-pin' {
 
 declare module 'bitcoin-pir-web/onionpir_client' {
   export interface OnionUtxoEntry { txid: Uint8Array; vout: number; amount: number | bigint; }
-  export interface OnionQueryResult { totalSats: bigint; entries: OnionUtxoEntry[]; isWhale?: boolean; }
+  export interface OnionQueryResult { totalSats: bigint; entries: OnionUtxoEntry[]; isWhale?: boolean; merkleVerified?: boolean; }
   export class OnionPirWebClient {
     constructor(opts: {
       serverUrl: string;
       expectedServerPin?: unknown;
-      expectedServerId?: string;
       pinnedOperatorPubkey?: Uint8Array;
+      onAttestation?: (status: { state: string; [k: string]: unknown }) => void;
+      onOperatorIdentity?: (status: { state: string; [k: string]: unknown }) => void;
       creditProvider?: (credits: number) => unknown;
       onCredits?: (status: { state: string; error?: string }) => void;
       [k: string]: unknown;
     });
     connect(): Promise<void>;
+    /** Verifies the per-bin Merkle proofs before it returns; see \`merkleVerified\`. */
     queryBatch(scriptHashes: Uint8Array[]): Promise<(OnionQueryResult | null)[]>;
-    verifyMerkleBatch(results: OnionQueryResult[]): Promise<boolean[]>;
     disconnect(): void;
   }
 }

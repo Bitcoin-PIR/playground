@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import type { Backend } from '@/components/BackendSelector';
 import { buildSnippet } from '@/lib/snippet';
 import { runUserCode, type RunLogLine, type RunOutcome } from '@/lib/runner/run-user-code';
-import { lintSafety } from '@/lib/runner/safety-lint';
 
 // Monaco is client-only and heavy — load it lazily and never during the static
 // export's prerender.
@@ -46,7 +45,6 @@ export function EditableRunner({
     if (!dirty) setCode(generated);
   }, [generated, dirty]);
 
-  const warnings = useMemo(() => lintSafety(code, backend), [code, backend]);
   const stale = dirty && code !== generated;
 
   const onChange = useCallback((next: string) => {
@@ -124,21 +122,6 @@ export function EditableRunner({
           >
             reset to generated snippet
           </button>
-        </div>
-      )}
-
-      {warnings.length > 0 && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs dark:border-amber-500/40 dark:bg-amber-500/10">
-          <div className="mb-1 font-semibold text-amber-800 dark:text-amber-300">
-            ⚠ Privacy / soundness check ({warnings.length}) — warning only, never blocks running
-          </div>
-          <ul className="space-y-1 text-amber-800/90 dark:text-amber-200/90">
-            {warnings.map((w) => (
-              <li key={w.id}>
-                <span className="font-medium">{w.title}:</span> {w.message}
-              </li>
-            ))}
-          </ul>
         </div>
       )}
 

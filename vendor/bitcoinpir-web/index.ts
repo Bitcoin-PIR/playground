@@ -57,7 +57,6 @@ export {
   deriveChunkGroups,
   deriveChunkCuckooKey,
   cuckooHashInt,
-  deriveIntGroups3,
   deriveCuckooKeyGeneric,
   sha256,
   ripemd160,
@@ -65,9 +64,7 @@ export {
   scriptPubKeyToAddress,
   addressToScriptPubKey,
   decompileScript,
-  decompileScriptText,
   type DecompiledOp,
-  reverseBytes,
   hexToBytes,
   bytesToHex,
 } from './hash.js';
@@ -80,8 +77,6 @@ export {
   CHUNK_SLOTS_PER_BIN, CHUNK_CUCKOO_NUM_HASHES,
   DPF_N, CHUNK_DPF_N,
   HARMONY_INDEX_W, HARMONY_CHUNK_W, HARMONY_EMPTY,
-  DEFAULT_SERVER0_URL,
-  DEFAULT_SERVER1_URL,
   BUCKET_MERKLE_ARITY, BUCKET_MERKLE_SIB_ROW_SIZE,
   REQ_BUCKET_MERKLE_SIB_BATCH, RESP_BUCKET_MERKLE_SIB_BATCH,
   REQ_BUCKET_MERKLE_TREE_TOPS, RESP_BUCKET_MERKLE_TREE_TOPS,
@@ -124,20 +119,16 @@ export {
 } from './credits.js';
 
 export {
-  computeDataHash,
   computeParentN,
-  computeBinLeafHash,
 } from './merkle.js';
 
 export {
   OnionPirWebClient,
-  createOnionPirWebClient,
   type OnionPirClientConfig,
 } from './onionpir_client.js';
 
 export {
   HarmonyPirClientAdapter,
-  createHarmonyPirClientAdapter,
   type HarmonyPirClientConfig,
 } from './harmonypir-adapter.js';
 
@@ -146,10 +137,8 @@ export {
   DEFAULT_ORAM_INDEX_READS_PER_SCRIPT_HASH,
   DEFAULT_ORAM_SCRIPT_HASHES_PER_REQUEST,
   OramPirClientAdapter,
-  createOramPirClientAdapter,
   oramJsonResultToQueryResult,
   planOramScriptHashBatches,
-  requireAtomicOramRequest,
   resolveOramBatchPlan,
   splitOramScriptHashBatches,
   type OramBatchPlan,
@@ -210,11 +199,6 @@ export type {
   QueryInspectorData,
   RoundTimingData,
 } from './harmony-types.js';
-
-export {
-  prepareQueryInspectorRenderDataV1,
-  type QueryInspectorRenderDataV1,
-} from './query-inspector-sanitize.js';
 
 export {
   fetchProofArtifactBytesV1,
@@ -294,12 +278,10 @@ export {
   sdkCuckooHashInt,
 } from './sdk-bridge.js';
 
-export { trustedNowUnixV1 } from './trusted-time.js';
 export { renderSecurityBadgeTextRowsV1 } from './security-badge.js';
 export type { SecurityBadgeTextRowV1 } from './security-badge.js';
 export { type HarmonyHintCacheBindingV1 } from './harmonypir_hint_db.js';
 
-export { requireVerifiedQueryResultsV1 } from './strict-result-release.js';
 
 export {
   STALE_CHUNK_RELOAD_KEY,
