@@ -461,6 +461,7 @@ export class WasmBucketMerkleTreeTops {
  * WASM wrapper for DatabaseCatalog.
  */
 export class WasmDatabaseCatalog {
+    private constructor();
     free(): void;
     [Symbol.dispose](): void;
     /**
@@ -488,47 +489,9 @@ export class WasmDatabaseCatalog {
      */
     static fromJson(json: any): WasmDatabaseCatalog;
     /**
-     * Get database info (by slot index in the catalog's array) as JSON.
-     *
-     * Pre-existing, positional — use [`getEntry`](Self::get_entry) if
-     * you want to look up by `db_id` instead.
-     */
-    getDatabase(index: number): any;
-    /**
-     * Get a database's full info by `db_id`, returning the same JSON
-     * shape as [`toJson`]'s `databases[i]` entry. Returns `null` if
-     * no database in the catalog carries that ID.
-     *
-     * Complements [`getDatabase`], which is positional — callers who
-     * only know the `db_id` (e.g. from a `SyncStep`) should reach
-     * here instead of scanning `getDatabase(i)` for the right index.
-     */
-    getEntry(db_id: number): any;
-    /**
-     * Does the database with `db_id` publish per-bucket bin Merkle
-     * commitments? `false` if the database is absent or carries no
-     * Merkle section.
-     *
-     * Queries on a database without commitments come back with
-     * `merkleVerified = false`.
-     */
-    hasBucketMerkle(db_id: number): boolean;
-    /**
-     * Create an empty catalog.
-     */
-    constructor();
-    /**
      * Convert to JSON.
      */
     toJson(): any;
-    /**
-     * Number of databases in the catalog.
-     */
-    readonly count: number;
-    /**
-     * Get latest tip height.
-     */
-    readonly latestTip: number | undefined;
 }
 
 /**
@@ -660,10 +623,7 @@ export class WasmDpfClient {
     /**
      * Fetch the database catalog from the server.
      *
-     * Returns a [`WasmDatabaseCatalog`] wrapping the native catalog —
-     * the same class returned by
-     * `WasmDatabaseCatalog.fromJson(...)` for the TS fallback path, so
-     * downstream sync-planning code works on both surfaces.
+     * Returns a [`WasmDatabaseCatalog`] wrapping the native catalog.
      */
     fetchCatalog(): Promise<WasmDatabaseCatalog>;
     /**
@@ -733,15 +693,6 @@ export class WasmDpfClient {
      * wire-level batch is unchanged.
      */
     queryBatchVerified(script_hashes: Uint8Array, db_id: number): Promise<any>;
-    /**
-     * Return the two server URLs this client is connected to as a
-     * `[string, string]` array (order matches the constructor:
-     * `[server0_url, server1_url]`).
-     *
-     * Safe to call at any time — no network I/O, no connection state
-     * needed.
-     */
-    serverUrls(): any;
     /**
      * Install a [`WasmAtomicMetrics`] recorder. All subsequent
      * connect / disconnect / byte / query-lifecycle events are
@@ -1044,15 +995,6 @@ export class WasmHarmonyClient {
      */
     saveHints(): any;
     /**
-     * Return the two server URLs this client is connected to as a
-     * `[string, string]` array (order matches the constructor:
-     * `[hint_server_url, query_server_url]`).
-     *
-     * Safe to call at any time — no network I/O, no connection state
-     * needed. Mirrors [`WasmDpfClient::server_urls`].
-     */
-    serverUrls(): any;
-    /**
      * Pin this client's hint state to `db_id`. If hints for a different
      * db are currently loaded, invalidates them — the next
      * `sync`/`queryBatch`/`queryBatchVerified` will re-fetch (or restore
@@ -1106,8 +1048,8 @@ export class WasmHarmonyClient {
     /**
      * Wrap both server connections (hint + query) with the encrypted
      * channel transport. See [`WasmDpfClient::upgrade_to_secure_channel`]
-     * — same eph_seed caching + binding flow. Argument order matches
-     * `serverUrls()` — `(hint, query)`.
+     * — same eph_seed caching + binding flow. Arguments are
+     * `(hint, query)`.
      */
     upgradeToSecureChannel(hint_server_static_pub: Uint8Array, query_server_static_pub: Uint8Array): Promise<void>;
     /**
@@ -1206,10 +1148,6 @@ export class WasmOramClient {
      */
     queryBatchPadded(script_hashes: Uint8Array, db_id: number, padded_slots: number): Promise<any>;
     /**
-     * Return the configured server URL.
-     */
-    serverUrl(): string;
-    /**
      * Install a [`WasmAtomicMetrics`] recorder.
      */
     setMetricsRecorder(metrics: WasmAtomicMetrics): void;
@@ -1300,6 +1238,7 @@ export class WasmPolicyRequirements {
  * WASM wrapper for QueryResult.
  */
 export class WasmQueryResult {
+    private constructor();
     free(): void;
     [Symbol.dispose](): void;
     /**
@@ -1332,10 +1271,6 @@ export class WasmQueryResult {
      * for not-found / inspector-free results.
      */
     matchedIndexIdx(): any;
-    /**
-     * Create an empty result.
-     */
-    constructor();
     /**
      * Raw chunk bytes for delta-database queries, or `undefined` for
      * full-snapshot queries (and for queries that didn't hit the
@@ -1414,7 +1349,6 @@ export class WasmStandaloneSecureChannelV1 {
      * chain, binary-pin and policy verification methods.
      */
     verifyAttestation(response_frame: Uint8Array): WasmAttestVerification;
-    readonly established: boolean;
 }
 
 /**
@@ -1428,14 +1362,6 @@ export class WasmSyncPlan {
      * Get a step by index.
      */
     getStep(index: number): any;
-    /**
-     * Get all steps as JSON array.
-     */
-    toJson(): any;
-    /**
-     * Whether the plan is empty (already at tip).
-     */
-    readonly isEmpty: boolean;
     /**
      * Whether this is a fresh sync.
      */
@@ -1682,12 +1608,6 @@ export function initTracingSubscriber(): void;
 export function mergeDelta(snapshot: WasmQueryResult, delta_raw: Uint8Array): WasmQueryResult;
 
 /**
- * JS-visible accessor for the Milan ARK fingerprint pinned in
- * pir-attest-verify (matches `web/src/attest-pin.ts`), for Milan servers.
- */
-export function milanArkFingerprint(): Uint8Array;
-
-/**
  * Plan multi-round PBC placement. Returns JSON.
  */
 export function planRounds(item_groups_flat: Uint32Array, items_per: number, num_groups: number, num_hashes: number, max_kicks: number): any;
@@ -1701,15 +1621,6 @@ export function readVarint(data: Uint8Array, offset: number): Uint32Array;
  * Splitmix64 finalizer. Returns 8 bytes (LE).
  */
 export function splitmix64(x_hi: number, x_lo: number): Uint8Array;
-
-/**
- * JS-visible accessor for the Turin ARK fingerprint pinned in
- * pir-attest-verify (matches `web/src/attest-pin.ts`). Returns the
- * 32-byte SHA-256 as a Uint8Array. Pass directly to
- * [`WasmAttestVerification::verify_full`] /
- * [`WasmAttestVerification::verify_vcek_chain`] for Turin servers.
- */
-export function turinArkFingerprint(): Uint8Array;
 
 /**
  * Parse + verify a raw RESP_ANNOUNCE wire payload (the response frame
@@ -1745,7 +1656,7 @@ export function verifyAnnounceResponse(resp_payload: Uint8Array): WasmAnnounceVe
  * too short, out-of-range group, missing tree-top, etc.) returns `false`
  * rather than erroring — it's a verification failure, not a programming
  * bug, and the caller must already handle "some items failed" as a normal
- * outcome (the native client coerces failures to `QueryResult::merkle_failed()`).
+ * outcome (the native client marks failed results `merkle_verified = false`).
  *
  * See `pir-sdk-client::merkle_verify::verify_sibling_levels` for the
  * reference implementation this tracks; the two functions must stay in sync.
@@ -1873,13 +1784,7 @@ export interface InitOutput {
     readonly wasmbucketmerkletreetops_fromBytes: (a: number, b: number) => [number, number, number];
     readonly wasmbucketmerkletreetops_root: (a: number, b: number) => [number, number];
     readonly wasmbucketmerkletreetops_treeCount: (a: number) => number;
-    readonly wasmdatabasecatalog_count: (a: number) => number;
     readonly wasmdatabasecatalog_fromJson: (a: any) => [number, number, number];
-    readonly wasmdatabasecatalog_getDatabase: (a: number, b: number) => any;
-    readonly wasmdatabasecatalog_getEntry: (a: number, b: number) => any;
-    readonly wasmdatabasecatalog_hasBucketMerkle: (a: number, b: number) => number;
-    readonly wasmdatabasecatalog_latestTip: (a: number) => number;
-    readonly wasmdatabasecatalog_new: () => number;
     readonly wasmdatabasecatalog_toJson: (a: number) => any;
     readonly wasmdatabaseproof_blockHashHex: (a: number) => [number, number];
     readonly wasmdatabaseproof_bucketSuperRootHex: (a: number) => [number, number];
@@ -1919,7 +1824,6 @@ export interface InitOutput {
     readonly wasmdpfclient_presentCredits: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly wasmdpfclient_queryBatch: (a: number, b: any, c: number) => any;
     readonly wasmdpfclient_queryBatchVerified: (a: number, b: any, c: number) => any;
-    readonly wasmdpfclient_serverUrls: (a: number) => any;
     readonly wasmdpfclient_setMetricsRecorder: (a: number, b: number) => void;
     readonly wasmdpfclient_sync: (a: number, b: any, c: number) => any;
     readonly wasmdpfclient_syncWithProgress: (a: number, b: any, c: number, d: any) => any;
@@ -1952,7 +1856,6 @@ export interface InitOutput {
     readonly wasmharmonyclient_queryBatch: (a: number, b: any, c: number) => any;
     readonly wasmharmonyclient_queryBatchVerified: (a: number, b: any, c: number) => any;
     readonly wasmharmonyclient_saveHints: (a: number) => [number, number, number];
-    readonly wasmharmonyclient_serverUrls: (a: number) => any;
     readonly wasmharmonyclient_setDbId: (a: number, b: number) => void;
     readonly wasmharmonyclient_setMasterKey: (a: number, b: number, c: number) => [number, number];
     readonly wasmharmonyclient_setMetricsRecorder: (a: number, b: number) => void;
@@ -1975,7 +1878,6 @@ export interface InitOutput {
     readonly wasmoramclient_presentCredits: (a: number, b: number, c: number, d: number) => any;
     readonly wasmoramclient_queryBatch: (a: number, b: any, c: number) => any;
     readonly wasmoramclient_queryBatchPadded: (a: number, b: any, c: number, d: number) => any;
-    readonly wasmoramclient_serverUrl: (a: number) => [number, number];
     readonly wasmoramclient_setMetricsRecorder: (a: number, b: number) => void;
     readonly wasmoramclient_upgradeToSecureChannel: (a: number, b: number, c: number) => any;
     readonly wasmoramclient_verifyDatabaseProof: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
@@ -1998,43 +1900,37 @@ export interface InitOutput {
     readonly wasmqueryresult_isWhale: (a: number) => number;
     readonly wasmqueryresult_matchedIndexIdx: (a: number) => any;
     readonly wasmqueryresult_merkleVerified: (a: number) => number;
-    readonly wasmqueryresult_new: () => number;
     readonly wasmqueryresult_rawChunkData: (a: number) => any;
     readonly wasmqueryresult_toJson: (a: number) => any;
     readonly wasmqueryresult_totalBalance: (a: number) => bigint;
     readonly wasmstandalonesecurechannelv1_attestRequest: (a: number) => [number, number];
     readonly wasmstandalonesecurechannelv1_completeHandshake: (a: number, b: number, c: number, d: number, e: number) => [number, number];
-    readonly wasmstandalonesecurechannelv1_established: (a: number) => number;
     readonly wasmstandalonesecurechannelv1_handshakeRequest: (a: number) => [number, number, number, number];
     readonly wasmstandalonesecurechannelv1_new: () => [number, number, number];
     readonly wasmstandalonesecurechannelv1_openFrame: (a: number, b: number, c: number) => [number, number, number, number];
     readonly wasmstandalonesecurechannelv1_sealFrame: (a: number, b: number, c: number) => [number, number, number, number];
     readonly wasmstandalonesecurechannelv1_verifyAttestation: (a: number, b: number, c: number) => [number, number, number];
     readonly wasmsyncplan_getStep: (a: number, b: number) => any;
-    readonly wasmsyncplan_isEmpty: (a: number) => number;
     readonly wasmsyncplan_isFreshSync: (a: number) => number;
     readonly wasmsyncplan_stepsCount: (a: number) => number;
     readonly wasmsyncplan_targetHeight: (a: number) => number;
-    readonly wasmsyncplan_toJson: (a: number) => any;
     readonly wasmsyncresult_getResult: (a: number, b: number) => number;
     readonly wasmsyncresult_resultCount: (a: number) => number;
     readonly wasmsyncresult_toJson: (a: number) => any;
     readonly xorBuffers: (a: number, b: number, c: number, d: number) => [number, number];
     readonly __wasm_init: () => void;
     readonly initTracingSubscriber: () => void;
-    readonly milanArkFingerprint: () => any;
-    readonly turinArkFingerprint: () => any;
     readonly wasmsyncresult_syncedHeight: (a: number) => number;
     readonly wasmsyncresult_wasFreshSync: (a: number) => number;
     readonly wasmharmonyclient_loadHints: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly wasm_bindgen__closure__destroy__h490263039c0c107c: (a: number, b: number) => void;
-    readonly wasm_bindgen__closure__destroy__h13a6b95fd26262cb: (a: number, b: number) => void;
+    readonly wasm_bindgen__closure__destroy__h1ca39849572cca3f: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen__convert__closures_____invoke__h1227e1e7bfd44bf9: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_2: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_3: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__hc39032372d75848d: (a: number, b: number) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_2: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_3: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h07f85ad109e2835f: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

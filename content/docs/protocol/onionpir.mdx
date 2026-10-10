@@ -161,8 +161,8 @@ too. The relevant code paths are:
 <Callout title="OnionPIR queryBatch verifies Merkle inline">
 Like the WASM clients, the standalone-TS `OnionPirWebClient.queryBatch`
 verifies the per-group Merkle proofs before it returns. Each result
-carries `merkleVerified`; a result whose proof fails comes back with no
-entries and `merkleVerified: false`.
+carries `merkleVerified`; a result whose proof fails keeps its entries
+with `merkleVerified: false`.
 </Callout>
 
 ## Implementation reference

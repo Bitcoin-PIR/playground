@@ -178,6 +178,11 @@ Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
 
+## Recent history (2026-10-11) — Phase 1 consolidation re-vendor
+
+Re-vendored BitcoinPIR `b22b7e98` (web/src + wasm, r10 wasm recipe): upstream's Phase 1 consolidation (#403–#417). `protocol.ts` and `polyfills.ts` are gone from `vendor/bitcoinpir-web`, `sdk-bridge.ts` lost its WASM-first wrappers, and the wasm dropped unused bindings (`milanArkFingerprint`, `turinArkFingerprint`, `WasmDatabaseCatalog.getDatabase`/`getEntry`/`hasBucketMerkle`, the clients' `serverUrl(s)`, `WasmSyncPlan.toJson`); the `.wasm` went from 2.54 to 2.47 MB. A result whose Merkle proofs fail now keeps its entries with `merkleVerified: false` (DPF/HarmonyPIR through the wasm, OnionPIR in TS), and OnionPIR reports unverified when a database has no Merkle data.
+- **Playground**: `attestation.mdx` imports `AMD_MILAN_ARK_FINGERPRINT` from `bitcoin-pir-web/attest-pin` (the package root does not re-export it); `onionpir.mdx` and the runner's ambient types describe per-result verdicts instead of "all or nothing"; `ResultPanel`'s ORAM note drops "(strict mode)". The result panel already lists the UTXOs under the red FAILED banner when `merkleVerified` is false.
+
 ## Recent history (2026-10-10) — verify-and-report re-vendor
 
 Re-vendored BitcoinPIR `96a365f3` (web/src + wasm, r10 wasm recipe): upstream dropped strict mode (#392–#395) and the SDK's all-or-nothing verifier (#394). `strict-verification.ts`, `strict-result-release.ts`, `trusted-time.ts` and `query-inspector-sanitize.ts` are gone; `verification.ts` is new; `ProductionProviderPin.stableServerId` and the `strictVerification` / `expectedServerId` options no longer exist.
