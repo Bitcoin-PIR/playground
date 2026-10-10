@@ -88,10 +88,9 @@ async function runDpf(tap: FrameTap, sh: Uint8Array): Promise<QueryRun> {
     // observable in the explorer, we leave the channel in cleartext.
     await client.connect();
     await client.fetchCatalog();
-    // `queryBatch` (not `queryBatchRaw`) verifies Merkle internally on the
-    // wasm-bindgen DPF/Harmony clients — the returned `merkleVerified` is
-    // a real verdict, not the default-true placeholder. (OnionPIR's
-    // hand-rolled `queryBatch` does NOT — see runOnion below.)
+    // `queryBatch` verifies Merkle internally on the wasm-bindgen
+    // DPF/Harmony clients — the returned `merkleVerified` is a real verdict.
+    // OnionPIR's `queryBatch` does the same (see runOnion below).
     const results = await client.queryBatch(packOne(sh), 0);
     const found = Array.isArray(results) && results.length > 0 && results[0] !== null;
     let outcome: string;
@@ -169,25 +168,11 @@ async function runOnion(tap: FrameTap, sh: Uint8Array): Promise<QueryRun> {
     const results = await client.queryBatch([sh], undefined, 0);
     const found = Array.isArray(results) && results.length > 0 && !!results[0];
 
-    // SOUNDNESS: `OnionPirWebClient.queryBatch` does NOT verify Merkle on
-    // its own — `merkleVerified` is left undefined. Drive the per-bin
-    // FHE sibling rounds via `verifyMerkleBatch` so the explorer wire
-    // capture also includes the Merkle traffic and the displayed outcome
-    // reflects a real verdict. (Identical pattern to
-    // `lib/playground-clients.ts::runOnionPirQuery`.)
-    const nonNull = results.filter(
-      (r): r is NonNullable<typeof r> => !!r,
-    );
-    let merkleVerdict: 'pass' | 'fail' | 'n/a' = 'n/a';
-    if (nonNull.length > 0) {
-      try {
-        const verdicts = await client.verifyMerkleBatch(nonNull);
-        merkleVerdict =
-          verdicts.length > 0 && verdicts.every(Boolean) ? 'pass' : 'fail';
-      } catch {
-        merkleVerdict = 'fail';
-      }
-    }
+    // `queryBatch` verifies the per-bin Merkle proofs (the FHE sibling
+    // rounds are part of the capture) and each result carries its verdict.
+    const verified = results.filter((r): r is NonNullable<typeof r> => !!r);
+    const merkleVerdict: 'pass' | 'fail' | 'n/a' =
+      verified.length === 0 ? 'n/a' : verified.every((r) => r.merkleVerified === true) ? 'pass' : 'fail';
 
     const baseOutcome = found
       ? `OnionPIR query completed — entry found`

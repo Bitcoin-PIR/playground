@@ -509,10 +509,8 @@ export class WasmDatabaseCatalog {
      * commitments? `false` if the database is absent or carries no
      * Merkle section.
      *
-     * The JS-side callers check this before enabling proof-backed queries;
-     * the native atomic verifier performs the same check internally. The
-     * flag is also useful for UI surfaces that show a "verified" badge only
-     * when verification actually ran.
+     * Queries on a database without commitments come back with
+     * `merkleVerified = false`.
      */
     hasBucketMerkle(db_id: number): boolean;
     /**
@@ -644,16 +642,11 @@ export class WasmDpfClient {
      */
     connect(): Promise<void>;
     /**
-     * Connect one provider without selecting or dialing its peer.
-     */
-    connectServer(server_index: number): Promise<void>;
-    /**
      * Close both WebSocket connections. After this the client returns
      * `isConnected === false` and `connect` must be called before the
      * next query.
      */
     disconnect(): Promise<void>;
-    disconnectServer(server_index: number): Promise<void>;
     /**
      * Pay one server's metered frames from `provider` when that server
      * requires credits (docs/CREDITS.md). `provider(credits)` returns
@@ -674,16 +667,11 @@ export class WasmDpfClient {
      */
     fetchCatalog(): Promise<WasmDatabaseCatalog>;
     /**
-     * Fetch and install-or-compare one staged provider's catalog.
-     */
-    fetchCatalogFromServer(server_index: number): Promise<WasmDatabaseCatalog>;
-    /**
-     * Consume and install the exact proof handle returned by
-     * `verifyDatabaseProof`. JavaScript must perform its production-pin
-     * comparison before transferring ownership here.
+     * Install the roots of a proof returned by `verifyDatabaseProof` (after
+     * any pin comparison): queries then check the Merkle tree-tops against
+     * them.
      */
     installVerifiedDatabaseProof(proof: WasmDatabaseProof): void;
-    isServerConnected(server_index: number): boolean;
     /**
      * Create a new DPF client. No network I/O happens until `connect` is
      * called.
@@ -704,8 +692,8 @@ export class WasmDpfClient {
      */
     onStateChange(cb: Function): void;
     /**
-     * Fetch and authenticate the bucket Merkle tree-tops before any private
-     * address query is allowed to run.
+     * Check the bucket Merkle tree-tops against the installed roots now
+     * instead of at the first query.
      */
     preflightDatabase(db_id: number): Promise<void>;
     /**
@@ -734,19 +722,11 @@ export class WasmDpfClient {
      */
     queryBatch(script_hashes: Uint8Array, db_id: number): Promise<any>;
     /**
-     * Release-safe inspector batch query. Native Rust retains every raw
-     * INDEX/CHUNK bin, re-derives coordinates and decoded payloads from the
-     * exact input order, and completes Merkle verification before this
-     * promise resolves. A single failed slot rejects the whole batch; JS
-     * never receives an unverified entry or an independently forgeable JSON
-     * proof object.
-     *
-     * Returns a JS `Array` of length `N` (the input scripthash count).
-     * Every slot is a non-null [`WasmQueryResult`] — not-found queries
-     * are synthesised as empty inspector-populated results so the
-     * absence-proof bins are preserved for verification.
-     * Empty input or a database without bucket-Merkle commitments fails
-     * before the private query phase.
+     * Query with inspector state: like `queryBatch`, verified the same way,
+     * but every slot is a non-null [`WasmQueryResult`] carrying the bins
+     * the query probed (`indexBins`, `chunkBins`, `matchedIndexIdx`). A
+     * not-found query is an empty result holding its two INDEX bins. Each
+     * result's `merkleVerified` is its own verdict.
      *
      * 🔒 Padding invariants are preserved (K=75 INDEX / K_CHUNK=80
      * CHUNK groups), including when most queries are not-found — the
@@ -784,15 +764,6 @@ export class WasmDpfClient {
      */
     setMetricsRecorder(metrics: WasmAtomicMetrics): void;
     /**
-     * Select whether every query must be bound to proof-verified database
-     * roots installed during the current connection.
-     */
-    setRequireVerifiedDatabaseRoots(require_verified: boolean): void;
-    /**
-     * Set one staged provider URL before that leg is connected.
-     */
-    setServerUrl(server_index: number, url: string): void;
-    /**
      * End-to-end sync: fetch catalog, plan, execute all steps, merge
      * deltas. Returns a [`WasmSyncResult`] whose `results[i]`
      * corresponds to the i-th script hash in the packed input.
@@ -819,11 +790,6 @@ export class WasmDpfClient {
      * not take the sync down.
      */
     syncWithProgress(script_hashes: Uint8Array, last_height: number | null | undefined, progress: Function): Promise<WasmSyncResult>;
-    /**
-     * Upgrade one staged provider using only that leg's attestation-bound
-     * ephemeral seed. No peer transport is inspected or modified.
-     */
-    upgradeServerToSecureChannel(server_index: number, server_static_pub: Uint8Array): Promise<void>;
     /**
      * Wrap both server connections with the encrypted-channel
      * transport.
@@ -857,10 +823,6 @@ export class WasmDpfClient {
      * network magic is always enforced.
      */
     verifyDatabaseProof(db_id: number, expected_params_hash_hex?: string | null, allowed_builder_binary_sha256_hex?: string | null, allowed_builder_git_commit?: string | null): Promise<WasmDatabaseProof>;
-    /**
-     * Verify the proof returned by one exact staged provider.
-     */
-    verifyDatabaseProofFromServer(server_index: number, db_id: number, expected_params_hash_hex?: string | null, allowed_builder_binary_sha256_hex?: string | null, allowed_builder_git_commit?: string | null): Promise<WasmDatabaseProof>;
     /**
      * True while both `conn0` and `conn1` are live.
      */
@@ -921,7 +883,6 @@ export class WasmHarmonyClient {
      * Open WebSocket connections to both hint and query servers.
      */
     connect(): Promise<void>;
-    connectProvider(provider_index: number): Promise<void>;
     /**
      * Get the currently-loaded `db_id`, or `null` if no hints are
      * loaded. See [`HarmonyClient::db_id`] for semantics.
@@ -931,7 +892,6 @@ export class WasmHarmonyClient {
      * Close both WebSocket connections.
      */
     disconnect(): Promise<void>;
-    disconnectProvider(provider_index: number): Promise<void>;
     /**
      * Pay the hint (0) or query (1) server's metered frames from
      * `provider` when it requires credits; see [`WasmDpfClient::enable_credits`]. `provider(credits)` returns
@@ -955,11 +915,9 @@ export class WasmHarmonyClient {
      * Fetch the database catalog from the hint server.
      */
     fetchCatalog(): Promise<WasmDatabaseCatalog>;
-    fetchCatalogFromProvider(provider_index: number): Promise<WasmDatabaseCatalog>;
     /**
-     * Pre-fetch every main and Merkle-sibling hint group needed to restore a
-     * paid hint entitlement across page reloads. Requires proof-verified tree
-     * tops to have been installed through `preflightDatabase` first.
+     * Pre-fetch every main and Merkle-sibling hint group, so the set can be
+     * cached and no later query downloads hints.
      */
     fetchCompleteHintsWithProgress(catalog: WasmDatabaseCatalog, db_id: number, progress: Function): Promise<void>;
     /**
@@ -993,20 +951,17 @@ export class WasmHarmonyClient {
      */
     fingerprint(catalog: WasmDatabaseCatalog, db_id: number): Uint8Array;
     /**
-     * True only when every main and authenticated sibling hint group for the
-     * proof-verified database is present in memory.
+     * Whether hints for `dbId` are loaded.
      */
     hasCompleteHints(catalog: WasmDatabaseCatalog, db_id: number): boolean;
     /**
-     * Consume and install the exact proof handle returned by
-     * `verifyDatabaseProof` after the browser's production-pin comparison.
+     * Install the roots of a proof returned by `verifyDatabaseProof` (after
+     * any pin comparison): queries then check the Merkle tree-tops against
+     * them.
      */
     installVerifiedDatabaseProof(proof: WasmDatabaseProof): void;
-    isProviderConnected(provider_index: number): boolean;
     /**
-     * Restore only a complete paid hint resource. The native client requires
-     * proof-verified tree tops for `dbId` and rejects main-only or malformed
-     * sibling state, clearing the partial in-memory bundle on failure.
+     * Same as `loadHints` (kept for existing callers).
      */
     loadCompleteHints(bytes: Uint8Array, catalog: WasmDatabaseCatalog, db_id: number): void;
     /**
@@ -1047,8 +1002,8 @@ export class WasmHarmonyClient {
      */
     onStateChange(cb: Function): void;
     /**
-     * Fetch and authenticate the bucket Merkle tree-tops before any private
-     * address query is allowed to run.
+     * Check the bucket Merkle tree-tops against the installed roots now
+     * instead of at the first query.
      */
     preflightDatabase(db_id: number): Promise<void>;
     /**
@@ -1068,11 +1023,8 @@ export class WasmHarmonyClient {
      */
     queryBatch(script_hashes: Uint8Array, db_id: number): Promise<any>;
     /**
-     * Release-safe inspector batch query. See
-     * [`WasmDpfClient::query_batch_verified`] for the all-or-nothing
-     * verification and JS-boundary contract.
-     * Empty input or a database without bucket-Merkle commitments fails
-     * before the private query phase.
+     * Query with inspector state. See
+     * [`WasmDpfClient::query_batch_verified`].
      *
      * 🔒 Padding invariants are preserved (K=75 INDEX / K_CHUNK=80
      * CHUNK groups) — padding lives in the native `HarmonyClient` query
@@ -1129,7 +1081,6 @@ export class WasmHarmonyClient {
      * 🔒 Padding invariants unaffected.
      */
     setMetricsRecorder(metrics: WasmAtomicMetrics): void;
-    setProviderUrl(provider_index: number, url: string): void;
     /**
      * Select the PRP backend.
      *
@@ -1139,11 +1090,6 @@ export class WasmHarmonyClient {
      * features on the enclosing build.
      */
     setPrpBackend(backend: number): void;
-    /**
-     * Select whether every query must be bound to proof-verified database
-     * roots installed during the current connection.
-     */
-    setRequireVerifiedDatabaseRoots(require_verified: boolean): void;
     /**
      * End-to-end sync. See [`WasmDpfClient::sync`] for argument
      * semantics — the wire path differs but the JS-facing shape is
@@ -1157,7 +1103,6 @@ export class WasmHarmonyClient {
      * event-shape contract.
      */
     syncWithProgress(script_hashes: Uint8Array, last_height: number | null | undefined, progress: Function): Promise<WasmSyncResult>;
-    upgradeProviderToSecureChannel(provider_index: number, server_static_pub: Uint8Array): Promise<void>;
     /**
      * Wrap both server connections (hint + query) with the encrypted
      * channel transport. See [`WasmDpfClient::upgrade_to_secure_channel`]
@@ -1172,7 +1117,6 @@ export class WasmHarmonyClient {
      * semantics. Mainnet network magic is always enforced.
      */
     verifyDatabaseProof(db_id: number, expected_params_hash_hex?: string | null, allowed_builder_binary_sha256_hex?: string | null, allowed_builder_git_commit?: string | null): Promise<WasmDatabaseProof>;
-    verifyDatabaseProofFromProvider(provider_index: number, db_id: number, expected_params_hash_hex?: string | null, allowed_builder_binary_sha256_hex?: string | null, allowed_builder_git_commit?: string | null): Promise<WasmDatabaseProof>;
     /**
      * True while both connections are live.
      */
@@ -1270,10 +1214,6 @@ export class WasmOramClient {
      */
     setMetricsRecorder(metrics: WasmAtomicMetrics): void;
     /**
-     * Require proof-root installation before ORAM query/admission.
-     */
-    setRequireVerifiedDatabaseRoots(require_verified: boolean): void;
-    /**
      * Wrap the single server connection with the encrypted-channel transport.
      *
      * `serverStaticPub` must be the 32-byte key from a verified attestation
@@ -1369,11 +1309,7 @@ export class WasmQueryResult {
      */
     chunkBins(): any;
     /**
-     * Create an unverified result from JSON.
-     *
-     * A caller-supplied `merkleVerified` property is ignored and the result
-     * is always marked `false`. JSON import is a data-compatibility API, not
-     * a proof or release boundary.
+     * Create a result from JSON (the `toJson` shape).
      */
     static fromJson(json: any): WasmQueryResult;
     /**
@@ -1384,8 +1320,7 @@ export class WasmQueryResult {
      * Inspector state: every INDEX cuckoo bin probed for this query,
      * as a JSON array of `{pbcGroup, binIndex, binContent}` objects.
      *
-     * Only non-empty for `QueryResult`s produced by the inspector path
-     * (e.g. `WasmDpfClient.queryBatchVerified`). Populated for found,
+     * Only non-empty for results of `queryBatchVerified`. Populated for found,
      * not-found, and whale alike — the item-count symmetry invariant
      * guarantees this array always has `INDEX_CUCKOO_NUM_HASHES = 2`
      * entries for an inspector-path result.
@@ -1398,7 +1333,7 @@ export class WasmQueryResult {
      */
     matchedIndexIdx(): any;
     /**
-     * Create an empty, unverified result.
+     * Create an empty result.
      */
     constructor();
     /**
@@ -1412,8 +1347,8 @@ export class WasmQueryResult {
      * `entries` already hold the canonical state — there is no
      * second-layer merge to feed.
      *
-     * Populated natively by the release-safe verified inspector query
-     * (when `db_info.kind.is_delta()`) and surfaced here as a
+     * Populated natively by the query (when `db_info.kind.is_delta()`) and
+     * surfaced here as a
      * `Uint8Array`. This getter is the only way the web client can
      * obtain the bytes — `toJson()` emits them as a hex string so that
      * persisted results also carry the delta payload across reloads.
@@ -1422,10 +1357,9 @@ export class WasmQueryResult {
     /**
      * Convert to JSON.
      *
-     * The emitted object is accepted by [`fromJson`] as a data round-trip,
+     * The emitted object is accepted by [`fromJson`] as a round-trip,
      * including optional inspector fields (`indexBins`, `chunkBins`,
-     * `matchedIndexIdx`). It is deliberately not accepted as proof input by
-     * DPF/Harmony clients; a deserialized result has no release authority.
+     * `matchedIndexIdx`).
      */
     toJson(): any;
     /**
@@ -1437,14 +1371,7 @@ export class WasmQueryResult {
      */
     readonly isWhale: boolean;
     /**
-     * Whether a native query/sync path established a positive per-bucket
-     * Merkle release verdict (or established that commitments are N/A).
-     *
-     * `WasmQueryResult::new()` and `fromJson()` always return `false`; only
-     * crate-internal native SDK paths can set the private provenance marker.
-     * A `false` value means unauthenticated/unreleased (including unverified,
-     * tainted, or failed), so callers must never interpret it as merely an
-     * attempted failure.
+     * Whether the query's Merkle proofs were checked and passed.
      */
     readonly merkleVerified: boolean;
     /**
@@ -1481,10 +1408,6 @@ export class WasmStandaloneSecureChannelV1 {
      * Seal one complete length-prefixed BitcoinPIR frame.
      */
     sealFrame(frame: Uint8Array): Uint8Array;
-    /**
-     * Non-secret exporter used by service authorization transcript binding.
-     */
-    serviceAuthorizationExporterV1(): Uint8Array;
     /**
      * Verify a same-socket `RESP_ATTEST` with the nonce bound to our hidden
      * X25519 ephemeral key. The returned handle retains all existing AMD
@@ -1546,15 +1469,12 @@ export class WasmSyncResult {
      * the DB publishes commitments).
      *
      * Mirrors the `results: Vec<Option<QueryResult>>` shape of the
-     * underlying sync: `None` = verified absent, `Some(qr)` with
-     * `merkleVerified = false` = untrusted/tainted result.
+     * underlying sync: `None` = not found, `Some(qr)` with
+     * `merkleVerified = false` = unverified or failed result.
      */
     getResult(index: number): WasmQueryResult | undefined;
     /**
-     * Convert the full sync result to a data-only plain JSON object.
-     * Verification provenance cannot survive conversion to caller-mutable
-     * JSON, so every `merkleVerified` property is false. Use `getResult()`
-     * to retain the opaque native provenance marker.
+     * Convert the full sync result to a plain JSON object.
      *
      * Shape:
      * ```json
@@ -1562,7 +1482,7 @@ export class WasmSyncResult {
      *   "results": [
      *     null,
      *     { "entries": [...], "isWhale": false,
-     *       "totalBalance": 0, "merkleVerified": false }
+     *       "totalBalance": 0, "merkleVerified": true }
      *   ],
      *   "syncedHeight": 900000,
      *   "wasFreshSync": true
@@ -1756,9 +1676,8 @@ export function initTracingSubscriber(): void;
  * * `delta_raw` - Raw delta chunk data bytes
  *
  * # Returns
- * A new unverified WasmQueryResult with the delta applied. The caller supplies
- * `delta_raw`, so merging always drops snapshot verification authority; the
- * merged payload requires a fresh native verification before release.
+ * A new WasmQueryResult with the delta applied. It keeps the snapshot's
+ * `merkleVerified`; the delta's own verdict is the caller's to combine.
  */
 export function mergeDelta(snapshot: WasmQueryResult, delta_raw: Uint8Array): WasmQueryResult;
 
@@ -1834,24 +1753,6 @@ export function verifyAnnounceResponse(resp_payload: Uint8Array): WasmAnnounceVe
 export function verifyBucketMerkleItem(bin_index: number, bin_content: Uint8Array, pbc_group: number, sibling_rows_flat: Uint8Array, tree_tops: WasmBucketMerkleTreeTops): boolean;
 
 /**
- * Verify a complete, length-prefixed `RESP_DB_PROOF` frame without owning a
- * WebSocket or PIR client.
- *
- * This is the authoritative verifier for transports that remain in
- * JavaScript, notably the standalone OnionPIR browser client.  `responseFrame`
- * must be exactly one record in the shape returned by that client's
- * `ManagedWebSocket.sendRaw`: `[u32 payload_len LE][opcode][body...]`.
- * The outer length, response opcode, requested database ID, catalog anchors,
- * attested-builder proof, and supplied policy pins are all checked before an
- * opaque [`WasmDatabaseProof`] is returned.
- *
- * The function is stateless and does not install roots.  JavaScript must
- * compare every exposed field with its production pin and then explicitly
- * transfer the same handle into its OnionPIR session root store.
- */
-export function verifyDatabaseProofResponse(response_frame: Uint8Array, catalog: WasmDatabaseCatalog, expected_db_id: number, expected_params_hash_hex?: string | null, allowed_builder_binary_sha256_hex?: string | null, allowed_builder_git_commit?: string | null): WasmDatabaseProof;
-
-/**
  * Strict OnionPIR verifier. It accepts only the v2 opcode/bundle/evidence
  * stack and therefore cannot silently fall back to a v1 proof.
  */
@@ -1921,7 +1822,6 @@ export interface InitOutput {
     readonly splitmix64: (a: number, b: number) => [number, number];
     readonly verifyAnnounceResponse: (a: number, b: number) => [number, number, number];
     readonly verifyBucketMerkleItem: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
-    readonly verifyDatabaseProofResponse: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number];
     readonly verifyDatabaseProofV2Response: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number];
     readonly verifyRawSnpReport: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
     readonly wasmannounceverification_binarySha256Hex: (a: number) => [number, number];
@@ -2007,15 +1907,11 @@ export interface InitOutput {
     readonly wasmdpfclient_attest: (a: number, b: number) => any;
     readonly wasmdpfclient_clearMetricsRecorder: (a: number) => void;
     readonly wasmdpfclient_connect: (a: number) => any;
-    readonly wasmdpfclient_connectServer: (a: number, b: number) => any;
     readonly wasmdpfclient_disconnect: (a: number) => any;
-    readonly wasmdpfclient_disconnectServer: (a: number, b: number) => any;
     readonly wasmdpfclient_enableCredits: (a: number, b: number, c: any) => any;
     readonly wasmdpfclient_fetchCatalog: (a: number) => any;
-    readonly wasmdpfclient_fetchCatalogFromServer: (a: number, b: number) => any;
     readonly wasmdpfclient_installVerifiedDatabaseProof: (a: number, b: number) => [number, number];
     readonly wasmdpfclient_isConnected: (a: number) => number;
-    readonly wasmdpfclient_isServerConnected: (a: number, b: number) => [number, number, number];
     readonly wasmdpfclient_new: (a: number, b: number, c: number, d: number) => number;
     readonly wasmdpfclient_onStateChange: (a: number, b: any) => void;
     readonly wasmdpfclient_preflightDatabase: (a: number, b: number) => any;
@@ -2025,37 +1921,28 @@ export interface InitOutput {
     readonly wasmdpfclient_queryBatchVerified: (a: number, b: any, c: number) => any;
     readonly wasmdpfclient_serverUrls: (a: number) => any;
     readonly wasmdpfclient_setMetricsRecorder: (a: number, b: number) => void;
-    readonly wasmdpfclient_setRequireVerifiedDatabaseRoots: (a: number, b: number) => void;
-    readonly wasmdpfclient_setServerUrl: (a: number, b: number, c: number, d: number) => [number, number];
     readonly wasmdpfclient_sync: (a: number, b: any, c: number) => any;
     readonly wasmdpfclient_syncWithProgress: (a: number, b: any, c: number, d: any) => any;
-    readonly wasmdpfclient_upgradeServerToSecureChannel: (a: number, b: number, c: number, d: number) => any;
     readonly wasmdpfclient_upgradeToSecureChannel: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly wasmdpfclient_verifyDatabaseProof: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
-    readonly wasmdpfclient_verifyDatabaseProofFromServer: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => any;
     readonly wasmharmonyclient_announce: (a: number, b: number) => any;
     readonly wasmharmonyclient_attest: (a: number, b: number) => any;
     readonly wasmharmonyclient_cacheMasterKey: (a: number) => any;
     readonly wasmharmonyclient_cachePrpBackend: (a: number) => number;
     readonly wasmharmonyclient_clearMetricsRecorder: (a: number) => void;
     readonly wasmharmonyclient_connect: (a: number) => any;
-    readonly wasmharmonyclient_connectProvider: (a: number, b: number) => any;
     readonly wasmharmonyclient_dbId: (a: number) => number;
     readonly wasmharmonyclient_disconnect: (a: number) => any;
-    readonly wasmharmonyclient_disconnectProvider: (a: number, b: number) => any;
     readonly wasmharmonyclient_enableCredits: (a: number, b: number, c: any) => any;
     readonly wasmharmonyclient_estimateHintSizeBytes: (a: number) => number;
     readonly wasmharmonyclient_fetchCatalog: (a: number) => any;
-    readonly wasmharmonyclient_fetchCatalogFromProvider: (a: number, b: number) => any;
     readonly wasmharmonyclient_fetchCompleteHintsWithProgress: (a: number, b: number, c: number, d: any) => any;
     readonly wasmharmonyclient_fetchHintsWithProgress: (a: number, b: number, c: number, d: any) => any;
     readonly wasmharmonyclient_fingerprint: (a: number, b: number, c: number) => [number, number, number];
     readonly wasmharmonyclient_hasCompleteHints: (a: number, b: number, c: number) => [number, number, number];
     readonly wasmharmonyclient_installVerifiedDatabaseProof: (a: number, b: number) => [number, number];
     readonly wasmharmonyclient_isConnected: (a: number) => number;
-    readonly wasmharmonyclient_isProviderConnected: (a: number, b: number) => [number, number, number];
     readonly wasmharmonyclient_loadCompleteHints: (a: number, b: number, c: number, d: number, e: number) => [number, number];
-    readonly wasmharmonyclient_loadHints: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly wasmharmonyclient_minQueriesRemaining: (a: number) => number;
     readonly wasmharmonyclient_new: (a: number, b: number, c: number, d: number) => number;
     readonly wasmharmonyclient_onStateChange: (a: number, b: any) => void;
@@ -2069,15 +1956,11 @@ export interface InitOutput {
     readonly wasmharmonyclient_setDbId: (a: number, b: number) => void;
     readonly wasmharmonyclient_setMasterKey: (a: number, b: number, c: number) => [number, number];
     readonly wasmharmonyclient_setMetricsRecorder: (a: number, b: number) => void;
-    readonly wasmharmonyclient_setProviderUrl: (a: number, b: number, c: number, d: number) => [number, number];
     readonly wasmharmonyclient_setPrpBackend: (a: number, b: number) => [number, number];
-    readonly wasmharmonyclient_setRequireVerifiedDatabaseRoots: (a: number, b: number) => void;
     readonly wasmharmonyclient_sync: (a: number, b: any, c: number) => any;
     readonly wasmharmonyclient_syncWithProgress: (a: number, b: any, c: number, d: any) => any;
-    readonly wasmharmonyclient_upgradeProviderToSecureChannel: (a: number, b: number, c: number, d: number) => any;
     readonly wasmharmonyclient_upgradeToSecureChannel: (a: number, b: number, c: number, d: number, e: number) => any;
     readonly wasmharmonyclient_verifyDatabaseProof: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
-    readonly wasmharmonyclient_verifyDatabaseProofFromProvider: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => any;
     readonly wasmoramclient_announce: (a: number) => any;
     readonly wasmoramclient_attest: (a: number) => any;
     readonly wasmoramclient_clearMetricsRecorder: (a: number) => void;
@@ -2094,7 +1977,6 @@ export interface InitOutput {
     readonly wasmoramclient_queryBatchPadded: (a: number, b: any, c: number, d: number) => any;
     readonly wasmoramclient_serverUrl: (a: number) => [number, number];
     readonly wasmoramclient_setMetricsRecorder: (a: number, b: number) => void;
-    readonly wasmoramclient_setRequireVerifiedDatabaseRoots: (a: number, b: number) => void;
     readonly wasmoramclient_upgradeToSecureChannel: (a: number, b: number, c: number) => any;
     readonly wasmoramclient_verifyDatabaseProof: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => any;
     readonly wasmpolicyrequirements_new: () => number;
@@ -2127,7 +2009,6 @@ export interface InitOutput {
     readonly wasmstandalonesecurechannelv1_new: () => [number, number, number];
     readonly wasmstandalonesecurechannelv1_openFrame: (a: number, b: number, c: number) => [number, number, number, number];
     readonly wasmstandalonesecurechannelv1_sealFrame: (a: number, b: number, c: number) => [number, number, number, number];
-    readonly wasmstandalonesecurechannelv1_serviceAuthorizationExporterV1: (a: number) => [number, number, number];
     readonly wasmstandalonesecurechannelv1_verifyAttestation: (a: number, b: number, c: number) => [number, number, number];
     readonly wasmsyncplan_getStep: (a: number, b: number) => any;
     readonly wasmsyncplan_isEmpty: (a: number) => number;
@@ -2145,6 +2026,7 @@ export interface InitOutput {
     readonly turinArkFingerprint: () => any;
     readonly wasmsyncresult_syncedHeight: (a: number) => number;
     readonly wasmsyncresult_wasFreshSync: (a: number) => number;
+    readonly wasmharmonyclient_loadHints: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly wasm_bindgen__closure__destroy__h490263039c0c107c: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__h13a6b95fd26262cb: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c: (a: number, b: number, c: any) => [number, number];

@@ -126,9 +126,9 @@ server process sees the script hash, the host does not. Since 2026-10-03
 it runs on its own VPSBG host (`wss://weikeng2.bitcoinpir.org`, AMD Milan,
 server id `pir2-oram-v1`), free while the guest has room. `ORAM_PROVIDER`
 carries its endpoint and pins; it is `null` only while Direct ORAM is
-paused, and clients then stop with `ORAM_PAUSED_MESSAGE`. Use the strict
-client with the production request shape — every lookup is one
-fixed-budget ORAM access with 25 padded slots:
+paused, and clients then stop with `ORAM_PAUSED_MESSAGE`. Use the
+production request shape — every lookup is one fixed-budget ORAM access
+with 25 padded slots:
 
 ```ts
 import {
@@ -139,7 +139,6 @@ if (!ORAM_PROVIDER) throw new Error(ORAM_PAUSED_MESSAGE);  // null only while pa
 
 new OramPirClientAdapter({
   serverUrl: ORAM_PROVIDER.endpoint,
-  strictVerification: true,                 // attestation + identity + DB proof, fail closed
   batchPlanner: PRODUCTION_ORAM_BATCH_PLANNER,
   // …pins: see the playground's ORAM snippet
 });

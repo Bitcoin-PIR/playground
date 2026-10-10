@@ -211,7 +211,6 @@ interface ServerLeg {
   pin: ServerAttestPin;
   index: 0 | 1;
   operatorPubkey: Uint8Array;
-  stableServerId: string;
 }
 
 async function attestAndUpgrade(
@@ -292,7 +291,7 @@ async function attestAndUpgrade(
         pin: s.pin,
       });
 
-      handles.push(allZero || state === 'mismatch' ? null : { pub: v.serverStaticPub.slice() });
+      handles.push(allZero ? null : { pub: v.serverStaticPub.slice() });
       v.free();
     } catch (e) {
       att.push({
@@ -306,7 +305,9 @@ async function attestAndUpgrade(
     }
   }
 
-  // Upgrade to the AEAD-sealed channel only when BOTH servers cleared.
+  // Upgrade to the AEAD-sealed channel when both servers present a channel
+  // key, as upstream `attestPair` does; a pin mismatch is reported, not
+  // enforced.
   let channelUpgraded = false;
   if (handles[0] && handles[1]) {
     try {
@@ -365,50 +366,10 @@ async function verifyOperatorIdentityOne(
   try {
     const nowSecs = BigInt(Math.floor(Date.now() / 1000));
     // maxAge 0n: only the future-dated guard runs (issued_at = boot time).
-    const identity = gateOperatorIdentity(v, server.operatorPubkey, handle.pub, nowSecs, 0n);
-    if (identity.state === 'verified' && identity.serverId !== server.stableServerId) {
-      return {
-        ...identity,
-        state: 'unverified',
-        error: `server_id ${identity.serverId ?? '?'} is not the pinned ${server.stableServerId}`,
-      };
-    }
-    return identity;
+    return gateOperatorIdentity(v, server.operatorPubkey, handle.pub, nowSecs, 0n);
   } finally {
     v.free();
   }
-}
-
-/**
- * A leg without a TEE (`noSevHost`: pir1, and since 2026-10-02 the pir2
- * MacBook node) has no hardware report binding its channel key; its
- * operator-signed identity is what ties that key to the operator. As in the
- * upstream strict mode (`collectStrictServerLegFailures`), such a leg needs a
- * verified identity for its pinned server id (checked in
- * verifyOperatorIdentityOne) whose signed binary hash the binary pin accepts
- * (`pinAcceptsBinary`: the pinned build, or its transition build while set).
- * Returns why the session must not query; empty when it may.
- */
-function noTeeLegFailures(
-  servers: ServerLeg[],
-  attestation: AttestationSummary[],
-  operatorIdentity: OperatorIdentitySummary[],
-): string[] {
-  const failures: string[] = [];
-  servers.forEach((s, i) => {
-    if (attestation[i]?.state !== 'unsupported') return; // SEV-attested leg
-    const id = operatorIdentity[i]?.identity;
-    if (!s.pin.binarySha256Hex) {
-      failures.push(`${s.label}: no TEE and no binary pin`);
-    } else if (id?.state !== 'verified') {
-      failures.push(
-        `${s.label}: no TEE, and its operator-signed identity is ${id?.state ?? 'missing'}${id?.error ? ` (${id.error})` : ''}`,
-      );
-    } else if (!pinAcceptsBinary(s.pin, id.binarySha256Hex ?? '')) {
-      failures.push(`${s.label}: the operator-signed binary hash does not match the binary pin`);
-    }
-  });
-  return failures;
 }
 
 /**
@@ -531,13 +492,7 @@ async function runTwoServerQuery(
       client,
       servers,
     );
-    if (!channelUpgraded) {
-      throw new Error('attestation did not clear both servers; refusing to query over an unsealed channel');
-    }
-    const identityFailures = noTeeLegFailures(servers, attestation, operatorIdentity);
-    if (identityFailures.length > 0) {
-      throw new Error(`refusing to query: ${identityFailures.join('; ')}`);
-    }
+    if (!channelUpgraded) notes.push('The channel stayed in cleartext: a server presented no channel key.');
     const credits = await enableCreditsOnAll(
       client,
       servers,
@@ -553,9 +508,8 @@ async function runTwoServerQuery(
     const qStart = performance.now();
     let wqrs: any[];
     try {
-      // Query + per-bucket Merkle verification in one all-or-nothing call:
-      // it returns only when every result verified against the published
-      // tree tops (not-found results included, as absence proofs).
+      // Query + per-bucket Merkle verification: each result carries its own
+      // verdict (not-found results included, as absence proofs).
       wqrs = (await client.queryBatchVerified(scriptHash, 0)) as any[];
     } catch (e) {
       const msg = errorMessage(e);
@@ -571,6 +525,7 @@ async function runTwoServerQuery(
     }
     const wqr = wqrs[0];
     const { utxos, totalSats, isWhale } = translateWasmEntries(wqr);
+    const merkleVerified = wqr.merkleVerified === true;
     if (typeof wqr.free === 'function') wqr.free();
 
     return {
@@ -583,7 +538,7 @@ async function runTwoServerQuery(
       totalSats,
       isWhale,
       verification: 'merkle',
-      merkleVerified: true,
+      merkleVerified,
       ...facts,
     };
   } finally {
@@ -600,7 +555,6 @@ const PIR1_LEG = (label: string, url: string): ServerLeg => ({
   pin: PIR1_PIN,
   index: 0,
   operatorPubkey: PIR1_PROVIDER.operatorPubkey,
-  stableServerId: PIR1_PROVIDER.stableServerId,
 });
 
 const PIR2_LEG = (label: string, url: string): ServerLeg => ({
@@ -609,7 +563,6 @@ const PIR2_LEG = (label: string, url: string): ServerLeg => ({
   pin: PIR2_PROVIDER.serverPin,
   index: 1,
   operatorPubkey: PIR2_PROVIDER.operatorPubkey,
-  stableServerId: PIR2_PROVIDER.stableServerId,
 });
 
 export async function runDpfQuery(
@@ -738,7 +691,6 @@ export async function runOnionPirQuery(
   const client = new OnionPirWebClient({
     serverUrl: url,
     expectedServerPin: PIR1_PIN,
-    expectedServerId: PIR1_PROVIDER.stableServerId,
     pinnedOperatorPubkey: PIR1_PROVIDER.operatorPubkey,
     onAttestation: (status) => {
       attestationInfo = status;
@@ -764,16 +716,10 @@ export async function runOnionPirQuery(
 
     const qStart = performance.now();
     let results: (QueryResult | null)[];
-    let merkleVerified: boolean;
     try {
+      // Verifies the per-bin Merkle proofs before it returns; each result
+      // carries its own verdict.
       results = await client.queryBatch([scriptHash], undefined, 0);
-      // queryBatch does not verify on its own — drive the per-bin Merkle
-      // proof rounds explicitly. An empty verdict list counts as untrusted
-      // (runMerkleBatch), never as "nothing to check".
-      merkleVerified = await runMerkleBatch(
-        () => client.verifyMerkleBatch(results.filter((r): r is QueryResult => !!r)),
-        notes,
-      );
     } catch (e) {
       const msg = errorMessage(e);
       if (CREDITS_REFUSAL.test(msg)) {
@@ -794,7 +740,7 @@ export async function runOnionPirQuery(
       totalSats: out.totalSats,
       isWhale: out.isWhale,
       verification: 'merkle',
-      merkleVerified,
+      merkleVerified: results[0]?.merkleVerified === true,
       ...facts(),
     };
   } finally {
@@ -808,25 +754,21 @@ export async function runOnionPirQuery(
 
 /**
  * The production Direct ORAM client configuration, shared by the structured
- * "Run query" path and the snippet. Strict: attestation (AMD chain + pinned
- * binary + MEASUREMENT), the operator-signed identity of the ORAM host, and a
- * database proof checked in the browser must all pass before any lookup, and
+ * "Run query" path and the snippet. The adapter checks the attestation (AMD
+ * chain + pinned binary + MEASUREMENT, Milan TCB floor), the operator-signed
+ * identity of the ORAM host and the database proof, and reports each outcome;
  * every lookup is one fixed-budget request (`PRODUCTION_ORAM_BATCH_PLANNER`).
- * The ORAM host is an AMD Milan, so its reports also meet the Milan TCB floor
- * (`applySevSnpPlatformFloor` in the adapter). Throws `ORAM_PAUSED_MESSAGE` if
- * `ORAM_PROVIDER` is null (no TEE host serving Direct ORAM).
+ * Throws `ORAM_PAUSED_MESSAGE` if `ORAM_PROVIDER` is null (no TEE host serving
+ * Direct ORAM).
  */
 export function oramProductionConfig(creditProvider: CreditProvider = NO_CREDITS) {
   const provider = ORAM_PROVIDER;
   if (!provider) throw new Error(ORAM_PAUSED_MESSAGE);
   return {
     serverUrl: provider.endpoint,
-    strictVerification: true,
     expectedArkFingerprint: provider.expectedArkFingerprint,
     expectedServerPin: provider.serverPin,
-    expectedServerId: provider.stableServerId,
     pinnedOperatorPubkey: provider.operatorPubkey,
-    verifyOperatorIdentity: true,
     databaseProofPins: PRODUCTION_ORAM_DB_PROOF_V2_PINS,
     batchPlanner: PRODUCTION_ORAM_BATCH_PLANNER,
     creditProvider,
@@ -889,8 +831,8 @@ export async function runOramQuery(
       totalSats: out.totalSats,
       isWhale: out.isWhale,
       verification: 'attested-oram',
-      // Strict mode refuses to query without a verified database proof, so a
-      // returned result implies it; state it from the adapter anyway.
+      // Direct ORAM has no Merkle proofs; this reports whether the database
+      // proof verified.
       merkleVerified: dbProof?.state === 'verified',
       ...facts(),
     };
@@ -922,29 +864,6 @@ function translateLegacyResult(r: QueryResult | null | undefined): {
     totalSats: r.totalSats ?? 0n,
     isWhale: !!r.isWhale,
   };
-}
-
-/**
- * Drive a per-result Merkle verification batch and reduce it to a single
- * trust verdict for the playground (we only run single-scripthash batches
- * here). Any throw is treated as untrusted — the proof either passed or
- * we couldn't prove it, never "skipped looks fine".
- */
-async function runMerkleBatch(
-  call: () => Promise<unknown>,
-  notes: string[],
-): Promise<boolean> {
-  try {
-    const verdicts = (await call()) as boolean[];
-    if (!Array.isArray(verdicts) || verdicts.length === 0) {
-      notes.push('Merkle verification returned no verdicts — treating as untrusted.');
-      return false;
-    }
-    return verdicts.every(Boolean);
-  } catch (e) {
-    notes.push(`Merkle verification errored — treating as untrusted: ${errorMessage(e)}`);
-    return false;
-  }
 }
 
 function reverseBytesHex(bytes: Uint8Array): string {

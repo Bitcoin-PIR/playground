@@ -60,30 +60,28 @@ measured.
 
 ## The full verification flow
 
-Neither live server has a TEE, so a wallet pins each server's binary
-and requires each server's operator-signed identity before it sends
-any credits or query frame:
+Neither live server has a TEE, so a wallet compares each server's
+binary with its pin and checks each server's operator-signed identity.
+The checks report; what to do with a mismatch is the wallet's choice:
 
 ```ts
 import {
   gateOperatorIdentity,
-  PIR1_PROVIDER,  // pir1: endpoint, PIR1_PIN, server id, operator key
-  PIR2_PROVIDER,  // pir2: endpoint, PIR2_MACBOOK_PIN, server id, operator key
+  PIR1_PROVIDER,  // pir1: endpoint, PIR1_PIN, operator key
+  PIR2_PROVIDER,  // pir2: endpoint, PIR2_MACBOOK_PIN, operator key
 } from 'bitcoin-pir-web';
 import { pinAcceptsBinary } from 'bitcoin-pir-web/attest-pin';
 
 const attest0 = await client.attest(0);  // hint server
 const attest1 = await client.attest(1);  // query server
 
-// --- Step 1: pin the operator's published binaries. Both servers
-// report `noSevHost`: the hash is self-reported, so it catches drift
-// from the published build but no hardware vouches for it. ---
-if (!pinAcceptsBinary(PIR1_PROVIDER.serverPin, attest0.binarySha256Hex)) {
-  throw new Error('Hint server binary hash drift');
-}
-if (!pinAcceptsBinary(PIR2_PROVIDER.serverPin, attest1.binarySha256Hex)) {
-  throw new Error('Query server binary hash drift');
-}
+// --- Step 1: compare with the operator's published binaries. Both
+// servers report `noSevHost`: the hash is self-reported, so it catches
+// drift from the published build but no hardware vouches for it. ---
+const pinOk = [
+  pinAcceptsBinary(PIR1_PROVIDER.serverPin, attest0.binarySha256Hex),
+  pinAcceptsBinary(PIR2_PROVIDER.serverPin, attest1.binarySha256Hex),
+];
 
 // --- Step 2: upgrade to the AEAD-sealed channel ---
 await client.upgradeToSecureChannel(
@@ -91,23 +89,22 @@ await client.upgradeToSecureChannel(
   attest1.serverStaticPub,
 );
 
-// --- Step 3: require the operator-signed identity of each server.
+// --- Step 3: check the operator-signed identity of each server.
 // Without a TEE this is what ties the channel key to the operator. ---
 const now = BigInt(Math.floor(Date.now() / 1000));
+const identities = [];
 for (const [i, p, att] of [[0, PIR1_PROVIDER, attest0], [1, PIR2_PROVIDER, attest1]] as const) {
   const v = await client.announce(i);
-  const id = gateOperatorIdentity(v, p.operatorPubkey, att.serverStaticPub, now);
+  identities.push(gateOperatorIdentity(v, p.operatorPubkey, att.serverStaticPub, now));
   v.free();
-  if (id.state !== 'verified' || id.serverId !== p.stableServerId
-      || !pinAcceptsBinary(p.serverPin, id.binarySha256Hex ?? '')) {
-    throw new Error(`server ${i}: operator identity ${id.state}`);
-  }
 }
+// `pinOk` and `identities[i].state` ('verified', 'unverified', ...) are
+// the verdicts.
 ```
 
-The TypeScript adapters do all of this in strict mode
-(`strictVerification: true`): a `noSevHost` server is admitted only with
-a binary pin and a verified operator identity.
+The TypeScript adapters run the same checks on connect and report each
+outcome (`attestation`, `operatorIdentity`); they do not refuse to
+query.
 
 ### On a TEE host
 

@@ -2,7 +2,7 @@
  * Address -> scripthash derivation for the playground.
  *
  * The PIR system keys queries on HASH160(scriptPubKey) (20 bytes) — the same
- * shape `WasmDpfClient.queryBatchRaw` / `WasmHarmonyClient.queryBatch` /
+ * shape `WasmDpfClient.queryBatchVerified` / `WasmHarmonyClient.queryBatchVerified` /
  * `OnionPirWebClient.queryBatch` consume. We accept any mainnet address
  * (bech32 / bech32m / base58check), reuse the vendor address parser, and
  * fall through to `null` on anything we can't decode.
