@@ -114,7 +114,7 @@ export function ResultPanel({ result }: { result: PlaygroundQueryResult }) {
       {!result.paymentRequired && result.verification === 'attested-oram' && result.merkleVerified && (
         <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
           Direct ORAM has no Merkle proofs: this result comes from the attested SEV-SNP runtime,
-          whose database proof verified in your browser before the lookup (strict mode).
+          whose database proof verified in your browser before the lookup.
         </div>
       )}
 

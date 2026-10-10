@@ -958,14 +958,6 @@ export class WasmDatabaseCatalog {
         wasm.__wbg_wasmdatabasecatalog_free(ptr, 0);
     }
     /**
-     * Number of databases in the catalog.
-     * @returns {number}
-     */
-    get count() {
-        const ret = wasm.wasmdatabasecatalog_count(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-    /**
      * Create a catalog from JSON.
      *
      * Expected format:
@@ -996,64 +988,6 @@ export class WasmDatabaseCatalog {
             throw takeFromExternrefTable0(ret[1]);
         }
         return WasmDatabaseCatalog.__wrap(ret[0]);
-    }
-    /**
-     * Get database info (by slot index in the catalog's array) as JSON.
-     *
-     * Pre-existing, positional — use [`getEntry`](Self::get_entry) if
-     * you want to look up by `db_id` instead.
-     * @param {number} index
-     * @returns {any}
-     */
-    getDatabase(index) {
-        const ret = wasm.wasmdatabasecatalog_getDatabase(this.__wbg_ptr, index);
-        return ret;
-    }
-    /**
-     * Get a database's full info by `db_id`, returning the same JSON
-     * shape as [`toJson`]'s `databases[i]` entry. Returns `null` if
-     * no database in the catalog carries that ID.
-     *
-     * Complements [`getDatabase`], which is positional — callers who
-     * only know the `db_id` (e.g. from a `SyncStep`) should reach
-     * here instead of scanning `getDatabase(i)` for the right index.
-     * @param {number} db_id
-     * @returns {any}
-     */
-    getEntry(db_id) {
-        const ret = wasm.wasmdatabasecatalog_getEntry(this.__wbg_ptr, db_id);
-        return ret;
-    }
-    /**
-     * Does the database with `db_id` publish per-bucket bin Merkle
-     * commitments? `false` if the database is absent or carries no
-     * Merkle section.
-     *
-     * Queries on a database without commitments come back with
-     * `merkleVerified = false`.
-     * @param {number} db_id
-     * @returns {boolean}
-     */
-    hasBucketMerkle(db_id) {
-        const ret = wasm.wasmdatabasecatalog_hasBucketMerkle(this.__wbg_ptr, db_id);
-        return ret !== 0;
-    }
-    /**
-     * Get latest tip height.
-     * @returns {number | undefined}
-     */
-    get latestTip() {
-        const ret = wasm.wasmdatabasecatalog_latestTip(this.__wbg_ptr);
-        return ret === 0x100000001 ? undefined : ret;
-    }
-    /**
-     * Create an empty catalog.
-     */
-    constructor() {
-        const ret = wasm.wasmdatabasecatalog_new();
-        this.__wbg_ptr = ret >>> 0;
-        WasmDatabaseCatalogFinalization.register(this, this.__wbg_ptr, this);
-        return this;
     }
     /**
      * Convert to JSON.
@@ -1462,10 +1396,7 @@ export class WasmDpfClient {
     /**
      * Fetch the database catalog from the server.
      *
-     * Returns a [`WasmDatabaseCatalog`] wrapping the native catalog —
-     * the same class returned by
-     * `WasmDatabaseCatalog.fromJson(...)` for the TS fallback path, so
-     * downstream sync-planning code works on both surfaces.
+     * Returns a [`WasmDatabaseCatalog`] wrapping the native catalog.
      * @returns {Promise<WasmDatabaseCatalog>}
      */
     fetchCatalog() {
@@ -1601,19 +1532,6 @@ export class WasmDpfClient {
      */
     queryBatchVerified(script_hashes, db_id) {
         const ret = wasm.wasmdpfclient_queryBatchVerified(this.__wbg_ptr, script_hashes, db_id);
-        return ret;
-    }
-    /**
-     * Return the two server URLs this client is connected to as a
-     * `[string, string]` array (order matches the constructor:
-     * `[server0_url, server1_url]`).
-     *
-     * Safe to call at any time — no network I/O, no connection state
-     * needed.
-     * @returns {any}
-     */
-    serverUrls() {
-        const ret = wasm.wasmdpfclient_serverUrls(this.__wbg_ptr);
         return ret;
     }
     /**
@@ -2143,19 +2061,6 @@ export class WasmHarmonyClient {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
-     * Return the two server URLs this client is connected to as a
-     * `[string, string]` array (order matches the constructor:
-     * `[hint_server_url, query_server_url]`).
-     *
-     * Safe to call at any time — no network I/O, no connection state
-     * needed. Mirrors [`WasmDpfClient::server_urls`].
-     * @returns {any}
-     */
-    serverUrls() {
-        const ret = wasm.wasmharmonyclient_serverUrls(this.__wbg_ptr);
-        return ret;
-    }
-    /**
      * Pin this client's hint state to `db_id`. If hints for a different
      * db are currently loaded, invalidates them — the next
      * `sync`/`queryBatch`/`queryBatchVerified` will re-fetch (or restore
@@ -2243,8 +2148,8 @@ export class WasmHarmonyClient {
     /**
      * Wrap both server connections (hint + query) with the encrypted
      * channel transport. See [`WasmDpfClient::upgrade_to_secure_channel`]
-     * — same eph_seed caching + binding flow. Argument order matches
-     * `serverUrls()` — `(hint, query)`.
+     * — same eph_seed caching + binding flow. Arguments are
+     * `(hint, query)`.
      * @param {Uint8Array} hint_server_static_pub
      * @param {Uint8Array} query_server_static_pub
      * @returns {Promise<void>}
@@ -2449,22 +2354,6 @@ export class WasmOramClient {
     queryBatchPadded(script_hashes, db_id, padded_slots) {
         const ret = wasm.wasmoramclient_queryBatchPadded(this.__wbg_ptr, script_hashes, db_id, padded_slots);
         return ret;
-    }
-    /**
-     * Return the configured server URL.
-     * @returns {string}
-     */
-    serverUrl() {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const ret = wasm.wasmoramclient_serverUrl(this.__wbg_ptr);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-        }
     }
     /**
      * Install a [`WasmAtomicMetrics`] recorder.
@@ -2739,15 +2628,6 @@ export class WasmQueryResult {
         return ret !== 0;
     }
     /**
-     * Create an empty result.
-     */
-    constructor() {
-        const ret = wasm.wasmqueryresult_new();
-        this.__wbg_ptr = ret >>> 0;
-        WasmQueryResultFinalization.register(this, this.__wbg_ptr, this);
-        return this;
-    }
-    /**
      * Raw chunk bytes for delta-database queries, or `undefined` for
      * full-snapshot queries (and for queries that didn't hit the
      * inspector path).
@@ -2827,13 +2707,6 @@ export class WasmStandaloneSecureChannelV1 {
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
-    }
-    /**
-     * @returns {boolean}
-     */
-    get established() {
-        const ret = wasm.wasmstandalonesecurechannelv1_established(this.__wbg_ptr);
-        return ret !== 0;
     }
     /**
      * Canonical cleartext `REQ_HANDSHAKE` using the same hidden ephemeral
@@ -2943,14 +2816,6 @@ export class WasmSyncPlan {
         return ret;
     }
     /**
-     * Whether the plan is empty (already at tip).
-     * @returns {boolean}
-     */
-    get isEmpty() {
-        const ret = wasm.wasmsyncplan_isEmpty(this.__wbg_ptr);
-        return ret !== 0;
-    }
-    /**
      * Whether this is a fresh sync.
      * @returns {boolean}
      */
@@ -2973,14 +2838,6 @@ export class WasmSyncPlan {
     get targetHeight() {
         const ret = wasm.wasmsyncplan_targetHeight(this.__wbg_ptr);
         return ret >>> 0;
-    }
-    /**
-     * Get all steps as JSON array.
-     * @returns {any}
-     */
-    toJson() {
-        const ret = wasm.wasmsyncplan_toJson(this.__wbg_ptr);
-        return ret;
     }
 }
 if (Symbol.dispose) WasmSyncPlan.prototype[Symbol.dispose] = WasmSyncPlan.prototype.free;
@@ -3406,16 +3263,6 @@ export function mergeDelta(snapshot, delta_raw) {
 }
 
 /**
- * JS-visible accessor for the Milan ARK fingerprint pinned in
- * pir-attest-verify (matches `web/src/attest-pin.ts`), for Milan servers.
- * @returns {Uint8Array}
- */
-export function milanArkFingerprint() {
-    const ret = wasm.milanArkFingerprint();
-    return ret;
-}
-
-/**
  * Plan multi-round PBC placement. Returns JSON.
  * @param {Uint32Array} item_groups_flat
  * @param {number} items_per
@@ -3457,19 +3304,6 @@ export function splitmix64(x_hi, x_lo) {
     var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v1;
-}
-
-/**
- * JS-visible accessor for the Turin ARK fingerprint pinned in
- * pir-attest-verify (matches `web/src/attest-pin.ts`). Returns the
- * 32-byte SHA-256 as a Uint8Array. Pass directly to
- * [`WasmAttestVerification::verify_full`] /
- * [`WasmAttestVerification::verify_vcek_chain`] for Turin servers.
- * @returns {Uint8Array}
- */
-export function turinArkFingerprint() {
-    const ret = wasm.turinArkFingerprint();
-    return ret;
 }
 
 /**
@@ -3516,7 +3350,7 @@ export function verifyAnnounceResponse(resp_payload) {
  * too short, out-of-range group, missing tree-top, etc.) returns `false`
  * rather than erroring — it's a verification failure, not a programming
  * bug, and the caller must already handle "some items failed" as a normal
- * outcome (the native client coerces failures to `QueryResult::merkle_failed()`).
+ * outcome (the native client marks failed results `merkle_verified = false`).
  *
  * See `pir-sdk-client::merkle_verify::verify_sibling_levels` for the
  * reference implementation this tracks; the two functions must stay in sync.
@@ -4097,28 +3931,28 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 428, function: Function { arguments: [Externref], shim_idx: 429, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 429, function: Function { arguments: [Externref], shim_idx: 430, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h490263039c0c107c, wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 605, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 606, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 606, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 607, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h1ca39849572cca3f, wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 605, function: Function { arguments: [NamedExternref("Event")], shim_idx: 606, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_2);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 606, function: Function { arguments: [NamedExternref("Event")], shim_idx: 607, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h1ca39849572cca3f, wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_2);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 605, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 606, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_3);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 606, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 607, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h1ca39849572cca3f, wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_3);
             return ret;
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 605, function: Function { arguments: [], shim_idx: 608, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h13a6b95fd26262cb, wasm_bindgen__convert__closures_____invoke__hc39032372d75848d);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 606, function: Function { arguments: [], shim_idx: 609, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h1ca39849572cca3f, wasm_bindgen__convert__closures_____invoke__h07f85ad109e2835f);
             return ret;
         },
         __wbindgen_cast_0000000000000006: function(arg0) {
@@ -4162,20 +3996,20 @@ function __wbg_get_imports() {
     };
 }
 
-function wasm_bindgen__convert__closures_____invoke__hc39032372d75848d(arg0, arg1) {
-    wasm.wasm_bindgen__convert__closures_____invoke__hc39032372d75848d(arg0, arg1);
+function wasm_bindgen__convert__closures_____invoke__h07f85ad109e2835f(arg0, arg1) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h07f85ad109e2835f(arg0, arg1);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_2(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_2(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_2(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_2(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_3(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h016d06f3304ff2df_3(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_3(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_3(arg0, arg1, arg2);
 }
 
 function wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c(arg0, arg1, arg2) {

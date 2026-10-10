@@ -113,7 +113,7 @@ ORAM host since 2026-10-03) adds hardware evidence before the channel
 upgrade, where `pin` is that host's `ServerAttestPin` from `attest-pin.ts`:
 
 ```ts
-import { AMD_MILAN_ARK_FINGERPRINT } from 'bitcoin-pir-web';
+import { AMD_MILAN_ARK_FINGERPRINT } from 'bitcoin-pir-web/attest-pin';
 
 if (attest.sevStatus !== 'reportDataMatch') {
   throw new Error(`SEV-SNP report did not bind: ${attest.sevStatus}`);

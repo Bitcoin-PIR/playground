@@ -54,7 +54,7 @@ declare module 'pir-sdk-wasm' {
     /** After the sealed channel: 'not-enabled' | 'not-required' | 'required' | 'best-effort'. */
     enableCredits(serverIndex: number, provider: CreditProvider): Promise<string>;
     fetchCatalog(): Promise<any>;
-    /** Query + per-bucket Merkle verification, all or nothing. */
+    /** Query + per-bucket Merkle verification; each result reports \`merkleVerified\`. */
     queryBatchVerified(scriptHashes: Uint8Array, dbId: number): Promise<WasmQueryResult[]>;
     queryBatch(scriptHashes: Uint8Array, dbId: number): Promise<any>;
     disconnect(): Promise<void>;
@@ -70,7 +70,7 @@ declare module 'pir-sdk-wasm' {
     fetchCatalog(): Promise<any>;
     fetchHintsWithProgress(catalog: any, dbId: number, progress: (p: any) => void): Promise<void>;
     saveHints(): any;
-    /** Fetches hints on first use; query + Merkle verification, all or nothing. */
+    /** Fetches hints on first use; query + Merkle verification, reported per result. */
     queryBatchVerified(scriptHashes: Uint8Array, dbId: number): Promise<WasmQueryResult[]>;
     queryBatch(scriptHashes: Uint8Array, dbId: number): Promise<any>;
     disconnect(): Promise<void>;
