@@ -102,8 +102,8 @@ const scriptHash = new Uint8Array([
 // Pack N script hashes into one Uint8Array (20*N bytes).
 const packed = scriptHash;
 
-// `null` for a fresh sync; pass the last-synced height for an
-// incremental delta sync.
+// `null`: `sync()` always runs a full sync (the newest snapshot plus
+// any deltas up to the tip).
 const sync = await client.sync(packed, null);
 
 for (let i = 0; i < sync.resultCount; i++) {

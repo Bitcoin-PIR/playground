@@ -112,7 +112,7 @@ provider, or a corporate network with restrictive egress.
 ## What's the same across all three
 
 This is the important bit. The three backends expose nearly identical
-SDK surfaces (`sync(scriptHashes, lastHeight)` returns the same
+SDK surfaces (`sync(scriptHashes, null)` returns the same
 `WasmSyncResult` shape) and share the same **wire-shape privacy
 invariants** — the [five invariants](/docs/privacy/invariants) hold
 for all three:

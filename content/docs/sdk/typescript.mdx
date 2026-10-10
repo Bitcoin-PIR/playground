@@ -85,20 +85,22 @@ no-op.
 ```ts
 client.sync(
   scriptHashes: Uint8Array,        // packed 20*N bytes
-  lastHeight?: number | null,      // null = fresh sync
+  lastHeight: null,                // always a full sync
 ): Promise<WasmSyncResult>
 ```
 
 - `scriptHashes` is concatenated 20-byte HASH160s.
-- `lastHeight` is the last block height your wallet has fully synced
-  to. Pass `null` to fetch a fresh full snapshot; pass a height to
-  fetch only the delta chain since then.
+- `lastHeight` must be `null`. The client keeps no previous results, so
+  `sync()` always runs a full sync: the newest full snapshot, then any
+  delta chain up to the tip. A height is rejected before anything is
+  sent, because a delta chain only carries changes and needs the
+  previous results to apply them to.
 
 The returned `WasmSyncResult` carries one slot per input script hash.
 A slot that's `undefined` means the script hash is verified absent.
 
 ```ts
-const sync = await client.sync(packed, lastHeight);
+const sync = await client.sync(packed, null);
 
 for (let i = 0; i < sync.resultCount; i++) {
   const r = sync.getResult(i);
@@ -122,7 +124,7 @@ console.log('synced height:', sync.syncedHeight);
 ```ts
 client.syncWithProgress(
   scriptHashes: Uint8Array,
-  lastHeight: number | null,
+  lastHeight: null,
   progress: (event: SyncProgressEvent) => void,
 ): Promise<WasmSyncResult>
 ```
@@ -245,10 +247,10 @@ responses against it.
 ### Sync + queries
 
 ```ts
-client.sync(scriptHashes, lastHeight): Promise<WasmSyncResult>
+client.sync(scriptHashes, null): Promise<WasmSyncResult>
 client.queryBatch(scriptHashes, dbId): Promise<any>
 client.queryBatchRaw(scriptHashes, dbId): Promise<any>
-client.syncWithProgress(scriptHashes, lastHeight, progress): Promise<WasmSyncResult>
+client.syncWithProgress(scriptHashes, null, progress): Promise<WasmSyncResult>
 ```
 
 Identical JS-facing contract to `WasmDpfClient`. Underneath, the hint
