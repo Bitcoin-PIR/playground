@@ -105,11 +105,11 @@ try {
   // `sync()` runs Merkle verification inline; the caller still MUST
   // guard on `result.merkleVerified` for each returned slot before
   // displaying entries — see Quickstart for the guard pattern.
-  await client.sync(packed, lastHeight);
+  await client.sync(packed, null);
 } catch (e) {
   if (`${e}`.includes('hints exhausted')) {
     await client.fetchHintsWithProgress(catalog, dbId, progress);
-    return client.sync(packed, lastHeight);
+    return client.sync(packed, null);
   }
   throw e;
 }
