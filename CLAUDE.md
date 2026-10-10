@@ -180,7 +180,7 @@ Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ## Recent history (2026-10-10) — verify-and-report re-vendor
 
-Re-vendored BitcoinPIR `6095e2e8` (web/src + wasm, r10 wasm recipe): upstream dropped strict mode (#392–#395) and the SDK's all-or-nothing verifier (#394). `strict-verification.ts`, `strict-result-release.ts`, `trusted-time.ts` and `query-inspector-sanitize.ts` are gone; `verification.ts` is new; `ProductionProviderPin.stableServerId` and the `strictVerification` / `expectedServerId` options no longer exist.
+Re-vendored BitcoinPIR `96a365f3` (web/src + wasm, r10 wasm recipe): upstream dropped strict mode (#392–#395) and the SDK's all-or-nothing verifier (#394). `strict-verification.ts`, `strict-result-release.ts`, `trusted-time.ts` and `query-inspector-sanitize.ts` are gone; `verification.ts` is new; `ProductionProviderPin.stableServerId` and the `strictVerification` / `expectedServerId` options no longer exist.
 - **Query layer** (`lib/playground-clients.ts`): no refusal gates (`noTeeLegFailures` and the unsealed-channel throw are gone); the channel is upgraded whenever both servers present a key, as upstream `attestPair` does. `merkleVerified` comes from each result (`queryBatchVerified` and OnionPIR `queryBatch` both verify inline and report per result; OnionPIR has no `verifyMerkleBatch` any more).
 - **Snippets / docs**: pin and identity checks log their verdicts instead of throwing; the ORAM config drops `strictVerification`, `expectedServerId`, `verifyOperatorIdentity`. `lib/runner/safety-lint.ts` and its amber banner are deleted.
 
