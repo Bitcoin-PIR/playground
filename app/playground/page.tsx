@@ -27,9 +27,10 @@ export default function PlaygroundPage() {
         </p>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
           <strong>DPF-PIR</strong> and <strong>HarmonyPIR</strong> are free while the servers
-          have room: paid lookups go first, and a busy server says so. OnionPIR costs{' '}
+          have room: paid lookups go first, and a busy server says so. OnionPIR is free one
+          lookup at a time within an hourly budget; past it a lookup needs{' '}
           <a href="/docs/sdk/payments" className="underline">credits</a>, and the playground
-          has no wallet yet, so it stops at the first paid frame and shows why.{' '}
+          has no wallet yet, so it stops at the first busy frame and shows why.{' '}
           <strong>ORAM TEE</strong> runs in an AMD SEV-SNP enclave and is also free while the
           server has room.
         </p>
