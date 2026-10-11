@@ -143,15 +143,14 @@ declare module 'bitcoin-pir-web' {
   }
   /** Credits wallet (see /docs/sdk/payments). */
   export class IssuerClient { constructor(baseUrl: string); info(): Promise<any>; }
-  export class CreditStore { constructor(); remainingCredits(now: number): number; }
-  export class CreditWallet {
-    constructor(store: CreditStore, arc: any, now?: () => number);
-    remainingCredits(): number;
+  export class CashuStore { constructor(); balance(): number; }
+  export class CashuWallet {
     present(credits: number): { kind: number; payload: Uint8Array; credits: number } | null;
+    reconcile(): Promise<{ returned: number; spent: number }>;
   }
-  export function purchaseCredential(...args: any[]): Promise<any>;
-  export function cashuLightningRail(): any;
-  export function sdkArcFactories(): { request: any; credential: any };
+  export function openCashuWallet(store: CashuStore): Promise<CashuWallet>;
+  export function topUpFromMint(issuer: IssuerClient, store: CashuStore, sat: number, hooks?: any): Promise<number>;
+  export function topUpX402(issuer: IssuerClient, store: CashuStore, sat: number, hooks?: any): Promise<number>;
   /** Mainnet address -> scriptPubKey hex (with opcodes), or null if undecodable. */
   export function addressToScriptPubKey(address: string): string | null;
   /** HASH160(scriptPubKey) — the 20-byte PIR query key. */
