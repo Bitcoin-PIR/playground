@@ -1,8 +1,8 @@
 # Payments (credits)
 
-Lookups a server charges for are paid in **credits**. A wallet buys a
-credential once over Lightning and then spends it one frame at a time; the servers never learn who bought it, and nothing links a lookup to
-a purchase. The design and the rate card live in
+Lookups a server charges for are paid in **credits**. A wallet buys
+Cashu ecash over Lightning and spends it one frame at a time; the servers
+never learn who bought it, and nothing links a lookup to a purchase. The design and the rate card live in
 [`docs/CREDITS.md`](https://github.com/Bitcoin-PIR/Bitcoin-PIR/blob/main/docs/CREDITS.md)
 in the main repo; this page is the wallet-side view.
 
@@ -17,12 +17,13 @@ paid and mixed servers, including ones other operators run.
 
 | Server | Serves | Access |
 | --- | --- | --- |
-| `pir1` — `wss://weikeng1.bitcoinpir.org` | DPF server 0, HarmonyPIR hints, OnionPIR | DPF and HarmonyPIR hints **best-effort** (free hint work capped per hour); OnionPIR **paid** |
-| `pir2` — `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` (MacBook, no TEE) | DPF server 1, HarmonyPIR queries | DPF and HarmonyPIR queries **best-effort** |
+| `pir1` — `wss://weikeng1.bitcoinpir.org` | DPF server 0, HarmonyPIR hints, OnionPIR | DPF and HarmonyPIR hints **best-effort** (free hint work capped per hour); OnionPIR **best-effort**, one lookup at a time within an hourly budget |
+| `pir2` — `wss://bitcoin-pir-weikeng-laptop.chenweikeng.com` (MacBook, no TEE) | DPF server 1, HarmonyPIR queries | DPF and HarmonyPIR queries **best-effort**; the server itself runs best-effort and may be offline |
 | ORAM host — `wss://weikeng2.bitcoinpir.org` (VPSBG, AMD SEV-SNP) | Direct ORAM | Direct ORAM **best-effort** |
 
-So **DPF-PIR, HarmonyPIR and Direct ORAM (the ORAM TEE backend) are free
-while the servers have room**; OnionPIR needs credits.
+So **every backend is free while the servers have room** (OnionPIR one
+lookup at a time within an hourly budget); credits buy priority when a
+free lane is busy.
 
 A best-effort frame goes out unpaid. When the server's free lane is full,
 or a lane with an hourly budget has used it up, the server answers
@@ -33,9 +34,9 @@ on the server's load and the connection's balance, never on what is
 looked up.
 
 <Callout kind="note" title="Try it without paying">
-The [playground](/playground) runs DPF-PIR and HarmonyPIR for free while
-the servers have room. For OnionPIR it shows exactly where a lookup stops
-without credits.
+The [playground](/playground) runs every backend for free while the
+servers have room. When a free lane is busy it shows exactly where a lookup
+stops without credits.
 </Callout>
 
 ## Price
@@ -43,8 +44,7 @@ without credits.
 | | |
 | --- | --- |
 | 1 credit | 10 sat |
-| Pack | 100 credits for 1,000 sat, over Lightning |
-| Credential lifetime | until the end of the 90-day epoch it was bought in, plus 30 days |
+| Top-up | any amount of sat: through the mint's Lightning invoice, or over x402 from the issuer (10 to 20,000 sat per purchase) |
 
 Rate card for one single-address lookup, when both servers of a backend
 charge for it (docs/CREDITS.md): DPF ≈ 2, HarmonyPIR ≈ 5 (fresh hint set),
@@ -54,25 +54,31 @@ response), so a batch costs less per address than a single lookup.
 
 ## How it works
 
-1. **Buy.** The wallet asks the Cashu mint (`https://mint.bitcoinpir.org`)
-   for a Lightning invoice, pays it, mints ecash, and trades the ecash at
-   the issuer (`https://issuer.bitcoinpir.org`, `POST /v2/credentials`)
-   for a **blindly signed ARC credential** worth 100 presentations.
-2. **Spend.** After the sealed channel is up, the client presents credits
-   on each connection that needs them (`REQ_CREDIT_PRESENT`, opcode
-   `0x12`, only accepted inside the encrypted channel). A presentation is
-   one unlinkable use of the credential.
-3. **Settle.** The server forwards the presentation to the issuer
-   (`/v2/redeem`), which checks it, rejects double spends, and credits the
-   connection with gas. The server then serves metered frames until the
-   balance runs out; the client tops up transparently.
+1. **Buy.** Either rail ends with ecash only the wallet can spend. The
+   wallet asks the Cashu mint (`https://mint.bitcoinpir.org`) for a
+   Lightning invoice, pays it, and mints into its own blinded outputs; or
+   it buys over **x402** from the issuer (`https://issuer.bitcoinpir.org`,
+   `POST /v2/x402/ecash`): it sends its blinded outputs, pays the invoice
+   bound to that request, and the issuer swaps its own ecash into those
+   outputs at the mint and returns the blind signatures. The wallet
+   unblinds the signatures itself.
+2. **Spend.** After the sealed channel is up, the client presents ecash
+   on each connection that needs it (`REQ_CREDIT_PRESENT`, opcode `0x12`,
+   kind 1, only accepted inside the encrypted channel): a `cashuB…` token
+   worth at least the credits the round needs.
+3. **Settle.** The server forwards the token to the issuer (`/v2/redeem`),
+   which swaps it at the mint (the mint refuses spent proofs) and credits
+   the connection with gas (7,200 gas per sat). The server then serves
+   metered frames until the balance runs out; the client tops up
+   transparently, and any overpay stays as connection gas.
 
-What each party sees: the mint sees the invoice and the buyer's network
-address; the issuer sees the ecash, the blinded request and the buyer's
-network address at purchase, and later which server redeemed a
-presentation and when; a server sees the connection and the
-presentation. Presentations are unlinkable to the purchase (blind
-signatures), and PIR hides the query contents from everyone regardless.
+What each party sees: buying from the mint, the mint sees the Lightning
+payment and the buyer's network address; over x402, the issuer does. Both
+see only blinded outputs. On a lookup, a server sees the connection and the
+token, the issuer which server redeemed it and when, and the mint the
+proofs being swapped. A proof is unlinkable to its purchase (blind
+signatures; the wallet keeps no DLEQ blinding data), and PIR hides the
+query contents from everyone regardless.
 
 ## In the SDK
 
@@ -126,36 +132,35 @@ new OramPirClientAdapter({
 
 ```ts
 import {
-  IssuerClient, CreditStore, CreditWallet,
-  purchaseCredential, cashuLightningRail, sdkArcFactories,
+  IssuerClient, CashuStore, openCashuWallet, topUpFromMint, topUpX402,
   PRODUCTION_ISSUER_URL,
 } from 'bitcoin-pir-web';
 
 const issuer = new IssuerClient(PRODUCTION_ISSUER_URL);
-const store = new CreditStore();                 // localStorage
-const info = await issuer.info();                // offers, mints, ARC key
-
-// Buy one pack: shows the invoice through `onInvoice`, waits for payment,
-// mints the ecash, has the issuer sign a blinded credential, stores it.
-await purchaseCredential(
-  issuer, store, sdkArcFactories().request, cashuLightningRail(),
-  info.offers[0], info.mints[0],
-  { onInvoice: (bolt11) => showInvoice(bolt11) },
-);
-
-const wallet = new CreditWallet(store, sdkArcFactories().credential);
+const store = new CashuStore();                  // localStorage
+const wallet = await openCashuWallet(store);     // loads cashu-ts
 // wallet.present is the credit provider.
+
+// Top up 1,000 sat through the mint's Lightning invoice: shows the invoice
+// through `onInvoice`, waits for payment, mints into the wallet's own
+// blinded outputs and stores the proofs.
+await topUpFromMint(issuer, store, 1000, { onInvoice: (bolt11) => showInvoice(bolt11) });
+
+// Or over x402 from the issuer (pays through WebLN when the browser has it).
+await topUpX402(issuer, store, 1000, { onInvoice: (bolt11) => showInvoice(bolt11) });
 ```
 
-The purchase is resumable: if the page closes after payment, the minted
-token stays in the store and `purchaseCredential` finishes it next time.
-The credential's secrets live only where the store keeps them — clear
-that storage and the unspent credits are gone, by design.
+Both top-ups are resumable: the wallet stores its blinded outputs before
+minting, so if the page closes after payment, calling the same function
+again finishes it. Presented proofs move to "in flight" and are checked
+with the mint after two minutes (`wallet.reconcile()`); unspent ones come
+back. The ecash lives only where the store keeps it — clear that storage
+and the unspent ecash is gone, by design.
 
 <Callout kind="warn" title="Browser origin">
 The issuer answers cross-origin requests only from origins it lists, so
 a wallet served from another origin needs to be added on the issuer
-(`cors_origins`) before it can buy credentials in the browser.
+(`cors_origins`) before it can top up in the browser.
 </Callout>
 
 ### Rust

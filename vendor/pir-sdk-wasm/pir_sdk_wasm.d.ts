@@ -131,68 +131,6 @@ export class WasmAnnounceVerification {
 }
 
 /**
- * JavaScript view of [`ArcCredentialState`].
- */
-export class WasmArcCredential {
-    free(): void;
-    [Symbol.dispose](): void;
-    epoch(): number;
-    /**
-     * `credential` from [`WasmArcCredentialRequest::finalize`], the epoch
-     * and presentation limit the issuer named, and the persisted
-     * `next_nonce` (0 for a fresh credential).
-     */
-    constructor(credential: Uint8Array, epoch: number, presentation_limit: number, next_nonce: number);
-    /**
-     * Persist this after every [`Self::present`], before sending the payload.
-     */
-    nextNonce(): number;
-    /**
-     * A `REQ_CREDIT_PRESENT` kind-2 payload of `count` presentations,
-     * advancing the nonce counter. Fails without consuming anything when
-     * fewer than `count` remain.
-     */
-    present(count: number): Uint8Array;
-    presentationLimit(): number;
-    /**
-     * Presentations (credits) left.
-     */
-    remaining(): number;
-}
-
-/**
- * JavaScript view of [`ArcRequestState`].
- */
-export class WasmArcCredentialRequest {
-    free(): void;
-    [Symbol.dispose](): void;
-    epoch(): number;
-    /**
-     * Finish with the issuer's answer (`response_hex` decoded, and the
-     * `issuer_public_key_hex` it named): verifies the issuance proof and
-     * returns the credential bytes to persist.
-     */
-    finalize(issuer_public_key_hex: string, response: Uint8Array): Uint8Array;
-    /**
-     * Restore a request persisted before paying.
-     */
-    static fromBytes(epoch: number, secrets: Uint8Array, request: Uint8Array): WasmArcCredentialRequest;
-    /**
-     * A fresh request for `epoch` (the issuer's current epoch from
-     * `GET /v2/info`).
-     */
-    constructor(epoch: number);
-    /**
-     * Bytes to send as `request_hex` in `POST /v2/credentials`.
-     */
-    requestBytes(): Uint8Array;
-    /**
-     * Secrets to persist next to the request bytes.
-     */
-    secretsBytes(): Uint8Array;
-}
-
-/**
  * Lock-free atomic metrics recorder exposed to JavaScript.
  *
  * Wraps `Arc<pir_sdk::AtomicMetrics>`. The `Arc` is cloned once per
@@ -665,8 +603,7 @@ export class WasmDpfClient {
     presentApiKey(server_index: number, key: string): Promise<void>;
     /**
      * Present credits (docs/CREDITS.md) on one server (`serverIndex` ∈
-     * {0, 1}): `kind` 1 is a Cashu token, 2 an ARC payload from
-     * [`crate::WasmArcCredential::present`]. Resolves to
+     * {0, 1}): `kind` 1 is a Cashu token (`cashuB…` as UTF-8). Resolves to
      * `{ gasAdded, gasBalance }`. Bearer material: call after
      * [`Self::upgrade_to_secure_channel`].
      */
@@ -1698,8 +1635,6 @@ export interface InitOutput {
     readonly PRP_FASTPRP: () => number;
     readonly PRP_HMR12: () => number;
     readonly __wbg_wasmannounceverification_free: (a: number, b: number) => void;
-    readonly __wbg_wasmarccredential_free: (a: number, b: number) => void;
-    readonly __wbg_wasmarccredentialrequest_free: (a: number, b: number) => void;
     readonly __wbg_wasmatomicmetrics_free: (a: number, b: number) => void;
     readonly __wbg_wasmattestverification_free: (a: number, b: number) => void;
     readonly __wbg_wasmbucketmerkletreetops_free: (a: number, b: number) => void;
@@ -1750,18 +1685,6 @@ export interface InitOutput {
     readonly wasmannounceverification_serverId: (a: number) => [number, number];
     readonly wasmannounceverification_validFrom: (a: number) => bigint;
     readonly wasmannounceverification_validUntil: (a: number) => bigint;
-    readonly wasmarccredential_epoch: (a: number) => number;
-    readonly wasmarccredential_new: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-    readonly wasmarccredential_nextNonce: (a: number) => number;
-    readonly wasmarccredential_present: (a: number, b: number) => [number, number, number, number];
-    readonly wasmarccredential_presentationLimit: (a: number) => number;
-    readonly wasmarccredential_remaining: (a: number) => number;
-    readonly wasmarccredentialrequest_epoch: (a: number) => number;
-    readonly wasmarccredentialrequest_finalize: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
-    readonly wasmarccredentialrequest_fromBytes: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
-    readonly wasmarccredentialrequest_new: (a: number) => [number, number, number];
-    readonly wasmarccredentialrequest_requestBytes: (a: number) => [number, number];
-    readonly wasmarccredentialrequest_secretsBytes: (a: number) => [number, number];
     readonly wasmatomicmetrics_new: () => number;
     readonly wasmatomicmetrics_snapshot: (a: number) => any;
     readonly wasmattestverification_arkPem: (a: number) => any;
@@ -1924,13 +1847,13 @@ export interface InitOutput {
     readonly wasmsyncresult_wasFreshSync: (a: number) => number;
     readonly wasmharmonyclient_loadHints: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly wasm_bindgen__closure__destroy__h490263039c0c107c: (a: number, b: number) => void;
-    readonly wasm_bindgen__closure__destroy__h1ca39849572cca3f: (a: number, b: number) => void;
+    readonly wasm_bindgen__closure__destroy__h17e8e7d9ee3b5d3f: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen__convert__closures_____invoke__h1227e1e7bfd44bf9: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_2: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_3: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h07f85ad109e2835f: (a: number, b: number) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc_2: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc_3: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h72f13cc750268860: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

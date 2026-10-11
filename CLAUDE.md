@@ -178,6 +178,10 @@ Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
 
+## Recent history (2026-10-11) — Cashu wallet re-vendor (ARC retired)
+
+Re-vendored BitcoinPIR `44adca1e` (web/src + wasm, r10 wasm recipe): upstream retired ARC credentials (#423, #424). Credits are plain Cashu ecash presented as `REQ_CREDIT_PRESENT` kind 1: `cashu-wallet.ts` is new (`CashuStore`, `CashuWallet.present`, `openCashuWallet`, `topUpFromMint`), x402 sells ecash (`topUpX402`, `POST /v2/x402/ecash`, the wallet's own blinded outputs), and `CreditStore`/`CreditWallet`/`purchaseCredential`/`cashuLightningRail`/`sdkArcFactories` and the `WasmArc*` bindings are gone (the `.wasm` went from 2.47 to 2.33 MB). `payments.mdx`, the runner's ambient types, `snippet.ts`, `typescript.mdx`, `troubleshooting.mdx` and `/rate-limiting` follow.
+
 ## Recent history (2026-10-11) — r11 pins and the OnionPIR free lane re-vendor
 
 Re-vendored BitcoinPIR `4b5e8f89` (web/src only; the wasm is byte-identical to the `b22b7e98` build): `attest-pin.ts` carries the r11 pins (Direct ORAM image 375, which has no server identity, and pir1's 987fad2f build) and pir1's new access policy. pir1 now serves OnionPIR on a best-effort free lane (one lookup at a time, up to 3M gas per hour, about four single-address lookups), so `app/playground/page.tsx`, `quickstart.mdx` and `operations/endpoints.mdx` no longer say OnionPIR always needs credits.

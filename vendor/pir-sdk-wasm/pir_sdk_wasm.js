@@ -281,193 +281,6 @@ export class WasmAnnounceVerification {
 if (Symbol.dispose) WasmAnnounceVerification.prototype[Symbol.dispose] = WasmAnnounceVerification.prototype.free;
 
 /**
- * JavaScript view of [`ArcCredentialState`].
- */
-export class WasmArcCredential {
-    __destroy_into_raw() {
-        const ptr = this.__wbg_ptr;
-        this.__wbg_ptr = 0;
-        WasmArcCredentialFinalization.unregister(this);
-        return ptr;
-    }
-    free() {
-        const ptr = this.__destroy_into_raw();
-        wasm.__wbg_wasmarccredential_free(ptr, 0);
-    }
-    /**
-     * @returns {number}
-     */
-    epoch() {
-        const ret = wasm.wasmarccredential_epoch(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-    /**
-     * `credential` from [`WasmArcCredentialRequest::finalize`], the epoch
-     * and presentation limit the issuer named, and the persisted
-     * `next_nonce` (0 for a fresh credential).
-     * @param {Uint8Array} credential
-     * @param {number} epoch
-     * @param {number} presentation_limit
-     * @param {number} next_nonce
-     */
-    constructor(credential, epoch, presentation_limit, next_nonce) {
-        const ptr0 = passArray8ToWasm0(credential, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmarccredential_new(ptr0, len0, epoch, presentation_limit, next_nonce);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        this.__wbg_ptr = ret[0] >>> 0;
-        WasmArcCredentialFinalization.register(this, this.__wbg_ptr, this);
-        return this;
-    }
-    /**
-     * Persist this after every [`Self::present`], before sending the payload.
-     * @returns {number}
-     */
-    nextNonce() {
-        const ret = wasm.wasmarccredential_nextNonce(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-    /**
-     * A `REQ_CREDIT_PRESENT` kind-2 payload of `count` presentations,
-     * advancing the nonce counter. Fails without consuming anything when
-     * fewer than `count` remain.
-     * @param {number} count
-     * @returns {Uint8Array}
-     */
-    present(count) {
-        const ret = wasm.wasmarccredential_present(this.__wbg_ptr, count);
-        if (ret[3]) {
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v1;
-    }
-    /**
-     * @returns {number}
-     */
-    presentationLimit() {
-        const ret = wasm.wasmarccredential_presentationLimit(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-    /**
-     * Presentations (credits) left.
-     * @returns {number}
-     */
-    remaining() {
-        const ret = wasm.wasmarccredential_remaining(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-}
-if (Symbol.dispose) WasmArcCredential.prototype[Symbol.dispose] = WasmArcCredential.prototype.free;
-
-/**
- * JavaScript view of [`ArcRequestState`].
- */
-export class WasmArcCredentialRequest {
-    static __wrap(ptr) {
-        ptr = ptr >>> 0;
-        const obj = Object.create(WasmArcCredentialRequest.prototype);
-        obj.__wbg_ptr = ptr;
-        WasmArcCredentialRequestFinalization.register(obj, obj.__wbg_ptr, obj);
-        return obj;
-    }
-    __destroy_into_raw() {
-        const ptr = this.__wbg_ptr;
-        this.__wbg_ptr = 0;
-        WasmArcCredentialRequestFinalization.unregister(this);
-        return ptr;
-    }
-    free() {
-        const ptr = this.__destroy_into_raw();
-        wasm.__wbg_wasmarccredentialrequest_free(ptr, 0);
-    }
-    /**
-     * @returns {number}
-     */
-    epoch() {
-        const ret = wasm.wasmarccredentialrequest_epoch(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-    /**
-     * Finish with the issuer's answer (`response_hex` decoded, and the
-     * `issuer_public_key_hex` it named): verifies the issuance proof and
-     * returns the credential bytes to persist.
-     * @param {string} issuer_public_key_hex
-     * @param {Uint8Array} response
-     * @returns {Uint8Array}
-     */
-    finalize(issuer_public_key_hex, response) {
-        const ptr0 = passStringToWasm0(issuer_public_key_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArray8ToWasm0(response, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmarccredentialrequest_finalize(this.__wbg_ptr, ptr0, len0, ptr1, len1);
-        if (ret[3]) {
-            throw takeFromExternrefTable0(ret[2]);
-        }
-        var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v3;
-    }
-    /**
-     * Restore a request persisted before paying.
-     * @param {number} epoch
-     * @param {Uint8Array} secrets
-     * @param {Uint8Array} request
-     * @returns {WasmArcCredentialRequest}
-     */
-    static fromBytes(epoch, secrets, request) {
-        const ptr0 = passArray8ToWasm0(secrets, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ptr1 = passArray8ToWasm0(request, wasm.__wbindgen_malloc);
-        const len1 = WASM_VECTOR_LEN;
-        const ret = wasm.wasmarccredentialrequest_fromBytes(epoch, ptr0, len0, ptr1, len1);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return WasmArcCredentialRequest.__wrap(ret[0]);
-    }
-    /**
-     * A fresh request for `epoch` (the issuer's current epoch from
-     * `GET /v2/info`).
-     * @param {number} epoch
-     */
-    constructor(epoch) {
-        const ret = wasm.wasmarccredentialrequest_new(epoch);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        this.__wbg_ptr = ret[0] >>> 0;
-        WasmArcCredentialRequestFinalization.register(this, this.__wbg_ptr, this);
-        return this;
-    }
-    /**
-     * Bytes to send as `request_hex` in `POST /v2/credentials`.
-     * @returns {Uint8Array}
-     */
-    requestBytes() {
-        const ret = wasm.wasmarccredentialrequest_requestBytes(this.__wbg_ptr);
-        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v1;
-    }
-    /**
-     * Secrets to persist next to the request bytes.
-     * @returns {Uint8Array}
-     */
-    secretsBytes() {
-        const ret = wasm.wasmarccredentialrequest_secretsBytes(this.__wbg_ptr);
-        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v1;
-    }
-}
-if (Symbol.dispose) WasmArcCredentialRequest.prototype[Symbol.dispose] = WasmArcCredentialRequest.prototype.free;
-
-/**
  * Lock-free atomic metrics recorder exposed to JavaScript.
  *
  * Wraps `Arc<pir_sdk::AtomicMetrics>`. The `Arc` is cloned once per
@@ -1485,8 +1298,7 @@ export class WasmDpfClient {
     }
     /**
      * Present credits (docs/CREDITS.md) on one server (`serverIndex` ∈
-     * {0, 1}): `kind` 1 is a Cashu token, 2 an ARC payload from
-     * [`crate::WasmArcCredential::present`]. Resolves to
+     * {0, 1}): `kind` 1 is a Cashu token (`cashuB…` as UTF-8). Resolves to
      * `{ gasAdded, gasBalance }`. Bearer material: call after
      * [`Self::upgrade_to_secure_channel`].
      * @param {number} server_index
@@ -3931,28 +3743,28 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 429, function: Function { arguments: [Externref], shim_idx: 430, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 428, function: Function { arguments: [Externref], shim_idx: 429, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h490263039c0c107c, wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 606, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 607, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h1ca39849572cca3f, wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 577, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 578, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h17e8e7d9ee3b5d3f, wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 606, function: Function { arguments: [NamedExternref("Event")], shim_idx: 607, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h1ca39849572cca3f, wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_2);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 577, function: Function { arguments: [NamedExternref("Event")], shim_idx: 578, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h17e8e7d9ee3b5d3f, wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc_2);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 606, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 607, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h1ca39849572cca3f, wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_3);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 577, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 578, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h17e8e7d9ee3b5d3f, wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc_3);
             return ret;
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 606, function: Function { arguments: [], shim_idx: 609, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h1ca39849572cca3f, wasm_bindgen__convert__closures_____invoke__h07f85ad109e2835f);
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 577, function: Function { arguments: [], shim_idx: 580, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h17e8e7d9ee3b5d3f, wasm_bindgen__convert__closures_____invoke__h72f13cc750268860);
             return ret;
         },
         __wbindgen_cast_0000000000000006: function(arg0) {
@@ -3996,20 +3808,20 @@ function __wbg_get_imports() {
     };
 }
 
-function wasm_bindgen__convert__closures_____invoke__h07f85ad109e2835f(arg0, arg1) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h07f85ad109e2835f(arg0, arg1);
+function wasm_bindgen__convert__closures_____invoke__h72f13cc750268860(arg0, arg1) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h72f13cc750268860(arg0, arg1);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_2(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_2(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc_2(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc_2(arg0, arg1, arg2);
 }
 
-function wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_3(arg0, arg1, arg2) {
-    wasm.wasm_bindgen__convert__closures_____invoke__h4768fbb94680d3d6_3(arg0, arg1, arg2);
+function wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc_3(arg0, arg1, arg2) {
+    wasm.wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc_3(arg0, arg1, arg2);
 }
 
 function wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c(arg0, arg1, arg2) {
@@ -4028,12 +3840,6 @@ const __wbindgen_enum_BinaryType = ["blob", "arraybuffer"];
 const WasmAnnounceVerificationFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmannounceverification_free(ptr >>> 0, 1));
-const WasmArcCredentialFinalization = (typeof FinalizationRegistry === 'undefined')
-    ? { register: () => {}, unregister: () => {} }
-    : new FinalizationRegistry(ptr => wasm.__wbg_wasmarccredential_free(ptr >>> 0, 1));
-const WasmArcCredentialRequestFinalization = (typeof FinalizationRegistry === 'undefined')
-    ? { register: () => {}, unregister: () => {} }
-    : new FinalizationRegistry(ptr => wasm.__wbg_wasmarccredentialrequest_free(ptr >>> 0, 1));
 const WasmAtomicMetricsFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmatomicmetrics_free(ptr >>> 0, 1));

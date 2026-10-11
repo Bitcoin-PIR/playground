@@ -16,7 +16,7 @@
  *
  * `bitcoin-pir-web` is the whole vendored SDK entry (`web/src/index.ts`
  * upstream): adapters, pinned providers, the ORAM request shape, and the
- * credits wallet (IssuerClient, CreditStore, CreditWallet, ...).
+ * credits wallet (IssuerClient, CashuStore, CashuWallet, ...).
  *
  * Every value is the SAME live binding the structured "Run query" path uses
  * (`lib/playground-clients.ts`). There is no second, weaker code path: the

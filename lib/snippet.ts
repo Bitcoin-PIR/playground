@@ -34,7 +34,7 @@ export function buildSnippet(backend: Backend, address: string): string {
 const EMPTY_WALLET = `// Payments (/docs/sdk/payments): each server says per backend whether it
 // charges; a credit provider funds the frames that are paid, and buys
 // priority when a free lane is busy. This one is an empty wallet; pass
-// CreditWallet.present from 'bitcoin-pir-web' to pay.
+// CashuWallet.present from 'bitcoin-pir-web' to pay.
 const creditProvider = (credits: number) => null;`;
 
 // Neither live server has a TEE (both attest as 'noSevHost'), so nothing
