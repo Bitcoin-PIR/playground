@@ -178,6 +178,10 @@ Preview server: `.claude/launch.json` has a `playground` entry on port 3200.
 
 ---
 
+## Recent history (2026-10-11) — r11 pins and the OnionPIR free lane re-vendor
+
+Re-vendored BitcoinPIR `4b5e8f89` (web/src only; the wasm is byte-identical to the `b22b7e98` build): `attest-pin.ts` carries the r11 pins (Direct ORAM image 375, which has no server identity, and pir1's 987fad2f build) and pir1's new access policy. pir1 now serves OnionPIR on a best-effort free lane (one lookup at a time, up to 3M gas per hour, about four single-address lookups), so `app/playground/page.tsx`, `quickstart.mdx` and `operations/endpoints.mdx` no longer say OnionPIR always needs credits.
+
 ## Recent history (2026-10-11) — Phase 1 consolidation re-vendor
 
 Re-vendored BitcoinPIR `b22b7e98` (web/src + wasm, r10 wasm recipe): upstream's Phase 1 consolidation (#403–#417). `protocol.ts` and `polyfills.ts` are gone from `vendor/bitcoinpir-web`, `sdk-bridge.ts` lost its WASM-first wrappers, and the wasm dropped unused bindings (`milanArkFingerprint`, `turinArkFingerprint`, `WasmDatabaseCatalog.getDatabase`/`getEntry`/`hasBucketMerkle`, the clients' `serverUrl(s)`, `WasmSyncPlan.toJson`); the `.wasm` went from 2.54 to 2.47 MB. A result whose Merkle proofs fail now keeps its entries with `merkleVerified: false` (DPF/HarmonyPIR through the wasm, OnionPIR in TS), and OnionPIR reports unverified when a database has no Merkle data.
