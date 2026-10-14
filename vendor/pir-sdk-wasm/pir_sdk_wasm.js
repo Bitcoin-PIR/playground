@@ -2970,6 +2970,24 @@ export function deriveGroups(script_hash, k) {
 }
 
 /**
+ * The 16 NIP-01 `REQ` messages of a full catalog refresh, byte-exact as the
+ * directory relay profile expects them (`authors`, `kinds`, `#s`).
+ * @param {Uint8Array} directory_pubkey
+ * @returns {string[]}
+ */
+export function directoryCatalogRequestsV1(directory_pubkey) {
+    const ptr0 = passArray8ToWasm0(directory_pubkey, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.directoryCatalogRequestsV1(ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayJsValueFromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v2;
+}
+
+/**
  * Decode the per-group sub-query `count` fields from a
  * `REQ_HARMONY_BATCH_QUERY` (opcode `0x43`) frame, returning one entry
  * per `(group, sub_query)` slot in declaration order so JS can assert
@@ -3209,6 +3227,42 @@ export function verifyDatabaseProofV2Response(response_frame, catalog, expected_
         throw takeFromExternrefTable0(ret[1]);
     }
     return WasmDatabaseProof.__wrap(ret[0]);
+}
+
+/**
+ * Verify complete relay views of the catalog. `relays_json` is one JSON
+ * array of raw `EVENT` message strings per relay; `state_json` the floors a
+ * previous call returned (absent on first use). Returns the catalog JSON:
+ * `{ validUntil, shards, entries, rejected, state }`.
+ * @param {string} relays_json
+ * @param {string | null | undefined} state_json
+ * @param {Uint8Array} directory_pubkey
+ * @param {bigint} now_unix
+ * @returns {string}
+ */
+export function verifyDirectoryCatalogV1(relays_json, state_json, directory_pubkey, now_unix) {
+    let deferred5_0;
+    let deferred5_1;
+    try {
+        const ptr0 = passStringToWasm0(relays_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        var ptr1 = isLikeNone(state_json) ? 0 : passStringToWasm0(state_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArray8ToWasm0(directory_pubkey, wasm.__wbindgen_malloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ret = wasm.verifyDirectoryCatalogV1(ptr0, len0, ptr1, len1, ptr2, len2, now_unix);
+        var ptr4 = ret[0];
+        var len4 = ret[1];
+        if (ret[3]) {
+            ptr4 = 0; len4 = 0;
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        deferred5_0 = ptr4;
+        deferred5_1 = len4;
+        return getStringFromWasm0(ptr4, len4);
+    } finally {
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+    }
 }
 
 /**
@@ -3743,27 +3797,27 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 428, function: Function { arguments: [Externref], shim_idx: 429, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 432, function: Function { arguments: [Externref], shim_idx: 433, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h490263039c0c107c, wasm_bindgen__convert__closures_____invoke__h9bbb2438131d711c);
             return ret;
         },
         __wbindgen_cast_0000000000000002: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 577, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 578, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 548, function: Function { arguments: [NamedExternref("ErrorEvent")], shim_idx: 549, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h17e8e7d9ee3b5d3f, wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc);
             return ret;
         },
         __wbindgen_cast_0000000000000003: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 577, function: Function { arguments: [NamedExternref("Event")], shim_idx: 578, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 548, function: Function { arguments: [NamedExternref("Event")], shim_idx: 549, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h17e8e7d9ee3b5d3f, wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc_2);
             return ret;
         },
         __wbindgen_cast_0000000000000004: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 577, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 578, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 548, function: Function { arguments: [NamedExternref("MessageEvent")], shim_idx: 549, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h17e8e7d9ee3b5d3f, wasm_bindgen__convert__closures_____invoke__h14897ea4899cb1cc_3);
             return ret;
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 577, function: Function { arguments: [], shim_idx: 580, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 548, function: Function { arguments: [], shim_idx: 551, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__h17e8e7d9ee3b5d3f, wasm_bindgen__convert__closures_____invoke__h72f13cc750268860);
             return ret;
         },
@@ -3964,6 +4018,17 @@ function debugString(val) {
 function getArrayI32FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getInt32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
+function getArrayJsValueFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    const mem = getDataViewMemory0();
+    const result = [];
+    for (let i = ptr; i < ptr + 4 * len; i += 4) {
+        result.push(wasm.__wbindgen_externrefs.get(mem.getUint32(i, true)));
+    }
+    wasm.__externref_drop_slice(ptr, len);
+    return result;
 }
 
 function getArrayU32FromWasm0(ptr, len) {
