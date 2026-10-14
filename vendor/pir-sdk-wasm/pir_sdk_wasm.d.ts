@@ -1466,6 +1466,12 @@ export function deriveCuckooKey(master_seed_hi: number, master_seed_lo: number, 
 export function deriveGroups(script_hash: Uint8Array, k: number): Uint32Array;
 
 /**
+ * The 16 NIP-01 `REQ` messages of a full catalog refresh, byte-exact as the
+ * directory relay profile expects them (`authors`, `kinds`, `#s`).
+ */
+export function directoryCatalogRequestsV1(directory_pubkey: Uint8Array): string[];
+
+/**
  * Decode the per-group sub-query `count` fields from a
  * `REQ_HARMONY_BATCH_QUERY` (opcode `0x43`) frame, returning one entry
  * per `(group, sub_query)` slot in declaration order so JS can assert
@@ -1607,6 +1613,14 @@ export function verifyBucketMerkleItem(bin_index: number, bin_content: Uint8Arra
 export function verifyDatabaseProofV2Response(response_frame: Uint8Array, catalog: WasmDatabaseCatalog, expected_db_id: number, expected_params_hash_hex?: string | null, allowed_builder_binary_sha256_hex?: string | null, allowed_builder_git_commit?: string | null): WasmDatabaseProof;
 
 /**
+ * Verify complete relay views of the catalog. `relays_json` is one JSON
+ * array of raw `EVENT` message strings per relay; `state_json` the floors a
+ * previous call returned (absent on first use). Returns the catalog JSON:
+ * `{ validUntil, shards, entries, rejected, state }`.
+ */
+export function verifyDirectoryCatalogV1(relays_json: string, state_json: string | null | undefined, directory_pubkey: Uint8Array, now_unix: bigint): string;
+
+/**
  * Verify a standalone SEV-SNP report and PEM certificate chain.
  *
  * This is the static-artifact companion to
@@ -1661,6 +1675,7 @@ export interface InitOutput {
     readonly deriveChunkGroups: (a: number, b: number) => [number, number];
     readonly deriveCuckooKey: (a: number, b: number, c: number, d: number) => [number, number];
     readonly deriveGroups: (a: number, b: number, c: number) => [number, number];
+    readonly directoryCatalogRequestsV1: (a: number, b: number) => [number, number, number, number];
     readonly harmony_decode_counts: (a: number, b: number) => [number, number, number, number];
     readonly mergeDelta: (a: number, b: number, c: number) => [number, number, number];
     readonly planRounds: (a: number, b: number, c: number, d: number, e: number, f: number) => any;
@@ -1669,6 +1684,7 @@ export interface InitOutput {
     readonly verifyAnnounceResponse: (a: number, b: number) => [number, number, number];
     readonly verifyBucketMerkleItem: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
     readonly verifyDatabaseProofV2Response: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number];
+    readonly verifyDirectoryCatalogV1: (a: number, b: number, c: number, d: number, e: number, f: number, g: bigint) => [number, number, number, number];
     readonly verifyRawSnpReport: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
     readonly wasmannounceverification_binarySha256Hex: (a: number) => [number, number];
     readonly wasmannounceverification_chainError: (a: number) => [number, number];
@@ -1861,6 +1877,7 @@ export interface InitOutput {
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __externref_drop_slice: (a: number, b: number) => void;
     readonly __wbindgen_start: () => void;
 }
 
