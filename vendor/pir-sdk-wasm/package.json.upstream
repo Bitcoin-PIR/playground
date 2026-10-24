@@ -14,9 +14,7 @@
   "files": [
     "pir_sdk_wasm_bg.wasm",
     "pir_sdk_wasm.js",
-    "pir_sdk_wasm.d.ts",
-    "LICENSE-APACHE",
-    "LICENSE-MIT"
+    "pir_sdk_wasm.d.ts"
   ],
   "main": "pir_sdk_wasm.js",
   "homepage": "https://github.com/Bitcoin-PIR/Bitcoin-PIR",
